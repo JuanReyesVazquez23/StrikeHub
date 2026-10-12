@@ -10,8 +10,18 @@
  *
  * Al desplegar con cambios en dist/*, sube CACHE_VERSION (mismo número
  * que el ?v= de index.html) para que los clientes tomen lo nuevo.
+ *
+ * IMPORTANTE — no interceptar otros orígenes (línea `url.origin`):
+ * la CSP del sitio declara `connect-src 'self'`, y el `fetch()` de un
+ * service worker SÍ se evalúa contra connect-src (a diferencia del
+ * <img> del navegador, que usa img-src y sí admite https:). Sin este
+ * `return`, interceptar los logos de mlbstatic.com los rompía todos:
+ *Images servidas por otros dominios (logos de MLB en mlbstatic.com,
+ * imágenes de noticias) las deja pasar al navegador, que las resuelve
+ * con img-src. Además nunca se cacheaban aquí: una request no-cors
+ * devuelve response opaca y `res.ok` es false.
  */
-const CACHE_VERSION = '20261016';
+const CACHE_VERSION = '20261017';
 const CACHE = `strikehub-v${CACHE_VERSION}`;
 
 const SHELL = [
@@ -45,6 +55,8 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
+  // Otros orígenes: que los resuelva el navegador (ver nota de cabecera).
+  if (url.origin !== self.location.origin) return;
   if (url.pathname.includes('/api/')) {
     // API: red primero, caché como respaldo sin conexión.
     event.respondWith(
