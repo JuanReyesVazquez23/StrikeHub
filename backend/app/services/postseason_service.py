@@ -78,44 +78,44 @@ _DEFAULT_COLOR = "#3d3d43"
 # --------------------------------------------------------------------------
 # Utilidades
 # --------------------------------------------------------------------------
-def _int_or_none(value) -> int | None:
+def _parse_optional_int(raw_value) -> int | None:
     try:
-        return int(value)
+        return int(raw_value)
     except (TypeError, ValueError):
         return None
 
 
-def _tid(value) -> str | None:
+def _normalize_team_id(raw_value) -> str | None:
     """Normaliza un id de equipo a str (o None si no es válido)."""
-    n = _int_or_none(value)
-    return str(n) if n else None
+    parsed_id = _parse_optional_int(raw_value)
+    return str(parsed_id) if parsed_id else None
 
 
-def _round_of(game: dict) -> str | None:
-    by_type = _ROUND_BY_GAME_TYPE.get(str(game.get("gameType") or "").upper())
-    if by_type:
-        return by_type
-    desc = (game.get("seriesDescription") or "").lower()
-    for needle, round_key in _ROUND_BY_DESCRIPTION:
-        if needle in desc:
-            return round_key
+def _detect_round(schedule_game: dict) -> str | None:
+    round_from_type = _ROUND_BY_GAME_TYPE.get(str(schedule_game.get("gameType") or "").upper())
+    if round_from_type:
+        return round_from_type
+    series_description = (schedule_game.get("seriesDescription") or "").lower()
+    for keyword, round_code in _ROUND_BY_DESCRIPTION:
+        if keyword in series_description:
+            return round_code
     return None
 
 
-def _game_status(game: dict) -> str:
-    status = game.get("status") or {}
-    detailed = (status.get("detailedState") or "").lower()
-    if "postponed" in detailed or "cancel" in detailed:
+def _classify_game_status(schedule_game: dict) -> str:
+    game_status = schedule_game.get("status") or {}
+    detailed_state = (game_status.get("detailedState") or "").lower()
+    if "postponed" in detailed_state or "cancel" in detailed_state:
         return "postponed"
-    abstract = (status.get("abstractGameState") or "").lower()
-    if abstract == "final" or "final" in detailed or "game over" in detailed:
+    abstract_state = (game_status.get("abstractGameState") or "").lower()
+    if abstract_state == "final" or "final" in detailed_state or "game over" in detailed_state:
         return "final"
-    if abstract == "live" or "progress" in detailed or "review" in detailed:
+    if abstract_state == "live" or "progress" in detailed_state or "review" in detailed_state:
         return "live"
     return "scheduled"
 
 
-def _logo(team_id: str, logos: dict[str, str | None]) -> str:
+def _resolve_team_logo(team_id: str, logos: dict[str, str | None]) -> str:
     return logos.get(team_id) or f"https://www.mlbstatic.com/team-logos/{team_id}.svg"
 
 
@@ -132,56 +132,56 @@ def compute_seeds(standings: dict | None) -> dict[str, dict]:
     if not standings:
         return {}
 
-    by_league: dict[str, list[dict]] = {"AL": [], "NL": []}
-    for record in standings.get("records", []) or []:
-        league = _LEAGUE_BY_ID.get(_int_or_none((record.get("league") or {}).get("id")))
+    teams_by_league: dict[str, list[dict]] = {"AL": [], "NL": []}
+    for division_record in standings.get("records", []) or []:
+        league = _LEAGUE_BY_ID.get(_parse_optional_int((division_record.get("league") or {}).get("id")))
         if not league:
             continue
-        by_league[league].extend(record.get("teamRecords", []) or [])
+        teams_by_league[league].extend(division_record.get("teamRecords", []) or [])
 
-    def _rank(tr: dict, key: str) -> int:
-        n = _int_or_none(tr.get(key))
-        return n if n is not None else 10**6
+    def _rank_position(team_record: dict, rank_key: str) -> int:
+        parsed_rank = _parse_optional_int(team_record.get(rank_key))
+        return parsed_rank if parsed_rank is not None else 10**6
 
-    def _pct(tr: dict) -> float:
+    def _winning_pct(team_record: dict) -> float:
         try:
-            return float(tr.get("winningPercentage") or 0)
+            return float(team_record.get("winningPercentage") or 0)
         except (TypeError, ValueError):
             return 0.0
 
     seeds: dict[str, dict] = {}
-    for league, teams in by_league.items():
-        winners = [
-            tr for tr in teams
-            if tr.get("divisionLeader") is True or _int_or_none(tr.get("divisionRank")) == 1
+    for league, league_teams in teams_by_league.items():
+        division_winners = [
+            team_record for team_record in league_teams
+            if team_record.get("divisionLeader") is True or _parse_optional_int(team_record.get("divisionRank")) == 1
         ]
-        winner_ids = {_tid((tr.get("team") or {}).get("id")) for tr in winners}
-        wildcards = [
-            tr for tr in teams
-            if _tid((tr.get("team") or {}).get("id")) not in winner_ids
-            and _int_or_none(tr.get("wildCardRank")) is not None
+        winner_ids = {_normalize_team_id((team_record.get("team") or {}).get("id")) for team_record in division_winners}
+        wildcard_contenders = [
+            team_record for team_record in league_teams
+            if _normalize_team_id((team_record.get("team") or {}).get("id")) not in winner_ids
+            and _parse_optional_int(team_record.get("wildCardRank")) is not None
         ]
-        winners.sort(key=lambda tr: (_rank(tr, "leagueRank"), -_pct(tr)))
-        wildcards.sort(key=lambda tr: (_rank(tr, "wildCardRank"), -_pct(tr)))
+        division_winners.sort(key=lambda team_record: (_rank_position(team_record, "leagueRank"), -_winning_pct(team_record)))
+        wildcard_contenders.sort(key=lambda team_record: (_rank_position(team_record, "wildCardRank"), -_winning_pct(team_record)))
 
-        for idx, tr in enumerate(winners[:3]):
-            _put_seed(seeds, tr, league, idx + 1)
-        for idx, tr in enumerate(wildcards[:3]):
-            _put_seed(seeds, tr, league, idx + 4)
+        for position_index, team_record in enumerate(division_winners[:3]):
+            _assign_seed(seeds, team_record, league, position_index + 1)
+        for position_index, team_record in enumerate(wildcard_contenders[:3]):
+            _assign_seed(seeds, team_record, league, position_index + 4)
     return seeds
 
 
-def _put_seed(seeds: dict, team_record: dict, league: str, seed: int) -> None:
+def _assign_seed(seeds: dict, team_record: dict, league: str, seed: int) -> None:
     team = team_record.get("team") or {}
-    tid = _tid(team.get("id"))
-    if tid:
-        seeds[tid] = {"league": league, "seed": seed, "name": team.get("name") or ""}
+    team_id = _normalize_team_id(team.get("id"))
+    if team_id:
+        seeds[team_id] = {"league": league, "seed": seed, "name": team.get("name") or ""}
 
 
 # --------------------------------------------------------------------------
 # Series crudas desde el schedule
 # --------------------------------------------------------------------------
-def _collect_raw_series(schedule: dict) -> tuple[dict, dict, dict]:
+def _group_series_by_matchup(schedule: dict) -> tuple[dict, dict, dict]:
     """
     Agrupa los juegos por (ronda, par de equipos).
 
@@ -190,75 +190,75 @@ def _collect_raw_series(schedule: dict) -> tuple[dict, dict, dict]:
       - team_info: {team_id: {"name", "abbreviation"}}
       - team_league_hint: {team_id: "AL"|"NL"} sacado del objeto team hidratado
     """
-    series: dict = {}
+    grouped_series: dict = {}
     team_info: dict[str, dict] = {}
     league_hint: dict[str, str] = {}
 
-    for day in schedule.get("dates", []) or []:
-        for game in day.get("games", []) or []:
-            round_key = _round_of(game)
-            if not round_key:
+    for schedule_day in schedule.get("dates", []) or []:
+        for schedule_game in schedule_day.get("games", []) or []:
+            round_code = _detect_round(schedule_game)
+            if not round_code:
                 continue
-            teams = game.get("teams") or {}
-            home, away = teams.get("home") or {}, teams.get("away") or {}
-            home_team, away_team = home.get("team") or {}, away.get("team") or {}
-            home_id, away_id = _tid(home_team.get("id")), _tid(away_team.get("id"))
+            team_sides = schedule_game.get("teams") or {}
+            home_side, away_side = team_sides.get("home") or {}, team_sides.get("away") or {}
+            home_team, away_team = home_side.get("team") or {}, away_side.get("team") or {}
+            home_id, away_id = _normalize_team_id(home_team.get("id")), _normalize_team_id(away_team.get("id"))
             if not home_id or not away_id or home_id == away_id:
                 continue  # juego con equipos aún por definir
 
-            for tid, team in ((home_id, home_team), (away_id, away_team)):
-                info = team_info.setdefault(tid, {"name": "", "abbreviation": ""})
-                info["name"] = info["name"] or team.get("name") or ""
-                info["abbreviation"] = (
-                    info["abbreviation"] or team.get("abbreviation") or TEAM_META.get(tid, ("", ""))[0]
+            for team_id, team_payload in ((home_id, home_team), (away_id, away_team)):
+                info_entry = team_info.setdefault(team_id, {"name": "", "abbreviation": ""})
+                info_entry["name"] = info_entry["name"] or team_payload.get("name") or ""
+                info_entry["abbreviation"] = (
+                    info_entry["abbreviation"] or team_payload.get("abbreviation") or TEAM_META.get(team_id, ("", ""))[0]
                 )
-                hint = _LEAGUE_BY_ID.get(_int_or_none((team.get("league") or {}).get("id")))
+                hint = _LEAGUE_BY_ID.get(_parse_optional_int((team_payload.get("league") or {}).get("id")))
                 if hint:
-                    league_hint[tid] = hint
+                    league_hint[team_id] = hint
 
-            key = (round_key, frozenset((home_id, away_id)))
-            entry = series.get(key)
-            if entry is None:
-                entry = {
-                    "round": round_key,
+            matchup_key = (round_code, frozenset((home_id, away_id)))
+            series_entry = grouped_series.get(matchup_key)
+            if series_entry is None:
+                series_entry = {
+                    "round": round_code,
                     "ids": (home_id, away_id),
-                    "best_of": BEST_OF[round_key],
+                    "best_of": BEST_OF[round_code],
                     "games": [],
                     "wins": {home_id: 0, away_id: 0},
                 }
-                series[key] = entry
-            games_in_series = _int_or_none(game.get("gamesInSeries"))
-            if games_in_series in (3, 5, 7):
-                entry["best_of"] = games_in_series
+                grouped_series[matchup_key] = series_entry
+            series_length = _parse_optional_int(schedule_game.get("gamesInSeries"))
+            if series_length in (3, 5, 7):
+                series_entry["best_of"] = series_length
 
-            entry["games"].append(
+            series_entry["games"].append(
                 {
-                    "id": game.get("gamePk"),
-                    "game_number": _int_or_none(game.get("seriesGameNumber")),
-                    "date": game.get("gameDate"),
-                    "status": _game_status(game),
+                    "id": schedule_game.get("gamePk"),
+                    "game_number": _parse_optional_int(schedule_game.get("seriesGameNumber")),
+                    "date": schedule_game.get("gameDate"),
+                    "status": _classify_game_status(schedule_game),
                     "home_id": home_id,
                     "away_id": away_id,
                     "home_abbreviation": team_info[home_id]["abbreviation"],
                     "away_abbreviation": team_info[away_id]["abbreviation"],
-                    "home_score": home.get("score"),
-                    "away_score": away.get("score"),
+                    "home_score": home_side.get("score"),
+                    "away_score": away_side.get("score"),
                 }
             )
 
-    for entry in series.values():
-        entry["games"].sort(key=lambda g: (g["date"] or "", g["game_number"] or 0))
-        for g in entry["games"]:
-            hs, aws = g["home_score"], g["away_score"]
-            if g["status"] != "final" or hs is None or aws is None or hs == aws:
+    for series_entry in grouped_series.values():
+        series_entry["games"].sort(key=lambda series_game: (series_game["date"] or "", series_game["game_number"] or 0))
+        for series_game in series_entry["games"]:
+            home_runs, away_runs = series_game["home_score"], series_game["away_score"]
+            if series_game["status"] != "final" or home_runs is None or away_runs is None or home_runs == away_runs:
                 continue
-            entry["wins"][g["home_id"] if hs > aws else g["away_id"]] += 1
-        needed = entry["best_of"] // 2 + 1
-        entry["winner_id"] = next((tid for tid, w in entry["wins"].items() if w >= needed), None)
-        if entry["winner_id"]:
+            series_entry["wins"][series_game["home_id"] if home_runs > away_runs else series_game["away_id"]] += 1
+        wins_to_clinch = series_entry["best_of"] // 2 + 1
+        series_entry["winner_id"] = next((team_id for team_id, win_count in series_entry["wins"].items() if win_count >= wins_to_clinch), None)
+        if series_entry["winner_id"]:
             # Juegos "si es necesario" que ya no se jugaron: no se muestran.
-            entry["games"] = [g for g in entry["games"] if g["status"] in ("final", "live")]
-    return series, team_info, league_hint
+            series_entry["games"] = [series_game for series_game in series_entry["games"] if series_game["status"] in ("final", "live")]
+    return grouped_series, team_info, league_hint
 
 
 # --------------------------------------------------------------------------
@@ -272,25 +272,25 @@ def build_bracket(
 ) -> dict:
     logos = logos or {}
     seeds = compute_seeds(standings)
-    raw_series, team_info, league_hint = _collect_raw_series(schedule)
-    active = bool(raw_series)
+    grouped_series, team_info, league_hint = _group_series_by_matchup(schedule)
+    has_postseason_games = bool(grouped_series)
 
-    for tid, info in seeds.items():
-        entry = team_info.setdefault(tid, {"name": "", "abbreviation": TEAM_META.get(tid, ("", ""))[0]})
-        entry["name"] = entry["name"] or info["name"]
-        entry["abbreviation"] = entry["abbreviation"] or TEAM_META.get(tid, ("", ""))[0]
+    for team_id, seed_info in seeds.items():
+        info_entry = team_info.setdefault(team_id, {"name": "", "abbreviation": TEAM_META.get(team_id, ("", ""))[0]})
+        info_entry["name"] = info_entry["name"] or seed_info["name"]
+        info_entry["abbreviation"] = info_entry["abbreviation"] or TEAM_META.get(team_id, ("", ""))[0]
 
-    def league_of(tid: str) -> str | None:
-        return (seeds.get(tid) or {}).get("league") or league_hint.get(tid)
+    def resolve_league(team_id: str) -> str | None:
+        return (seeds.get(team_id) or {}).get("league") or league_hint.get(team_id)
 
-    seeds_available = all(
-        sum(1 for s in seeds.values() if s["league"] == lg) == 6 for lg in ("AL", "NL")
+    has_complete_seeds = all(
+        sum(1 for seed_info in seeds.values() if seed_info["league"] == league_code) == 6 for league_code in ("AL", "NL")
     )
 
     payload = {
         "season": season,
-        "postseason_active": active,
-        "seeds_available": seeds_available,
+        "postseason_active": has_postseason_games,
+        "seeds_available": has_complete_seeds,
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "stale": False,
         "al": [],
@@ -298,120 +298,120 @@ def build_bracket(
         "world_series": None,
         "champion": None,
     }
-    if not active:
+    if not has_postseason_games:
         return payload
 
-    used: set = set()
+    consumed_series_keys: set = set()
 
-    def pick(round_key: str, league: str | None, ids: list[str | None], single: bool = False):
+    def find_series_for_slot(round_code: str, league_code: str | None, expected_team_ids: list[str | None], allow_first_available: bool = False):
         """Busca la serie real que corresponde a una casilla del cuadro."""
-        wanted = {i for i in ids if i}
+        wanted_ids = {team_id for team_id in expected_team_ids if team_id}
         candidates = [
-            (key, s) for key, s in raw_series.items()
-            if s["round"] == round_key and key not in used
-            and (league is None or league_of(s["ids"][0]) == league or league_of(s["ids"][1]) == league)
+            (matchup_key, series_entry) for matchup_key, series_entry in grouped_series.items()
+            if series_entry["round"] == round_code and matchup_key not in consumed_series_keys
+            and (league_code is None or resolve_league(series_entry["ids"][0]) == league_code or resolve_league(series_entry["ids"][1]) == league_code)
         ]
-        candidates.sort(key=lambda kv: kv[1]["games"][0]["date"] or "")
-        for key, s in candidates:
-            if wanted & set(s["ids"]):
-                used.add(key)
-                return s
+        candidates.sort(key=lambda candidate: candidate[1]["games"][0]["date"] or "")
+        for matchup_key, series_entry in candidates:
+            if wanted_ids & set(series_entry["ids"]):
+                consumed_series_keys.add(matchup_key)
+                return series_entry
         # Sin sembrados no se puede casar por equipo: se asigna por orden de fecha.
         # En CS/WS solo existe una serie por liga, así que también aplica.
-        if candidates and (single or not seeds_available):
-            key, s = candidates[0]
-            used.add(key)
-            return s
+        if candidates and (allow_first_available or not has_complete_seeds):
+            matchup_key, series_entry = candidates[0]
+            consumed_series_keys.add(matchup_key)
+            return series_entry
         return None
 
-    def team_entry(tid: str | None, series: dict | None) -> dict | None:
-        if not tid:
+    def build_team_card(team_id: str | None, matched_series: dict | None) -> dict | None:
+        if not team_id:
             return None
-        info = team_info.get(tid, {})
-        winner = series.get("winner_id") if series else None
+        team_details = team_info.get(team_id, {})
+        series_winner = matched_series.get("winner_id") if matched_series else None
         return {
-            "id": tid,
-            "name": info.get("name", ""),
-            "abbreviation": info.get("abbreviation") or TEAM_META.get(tid, ("", ""))[0],
-            "logo_url": _logo(tid, logos),
-            "color": TEAM_META.get(tid, ("", _DEFAULT_COLOR))[1],
-            "seed": (seeds.get(tid) or {}).get("seed"),
-            "wins": series["wins"].get(tid, 0) if series else 0,
-            "is_winner": bool(winner and winner == tid),
-            "eliminated": bool(winner and winner != tid),
+            "id": team_id,
+            "name": team_details.get("name", ""),
+            "abbreviation": team_details.get("abbreviation") or TEAM_META.get(team_id, ("", ""))[0],
+            "logo_url": _resolve_team_logo(team_id, logos),
+            "color": TEAM_META.get(team_id, ("", _DEFAULT_COLOR))[1],
+            "seed": (seeds.get(team_id) or {}).get("seed"),
+            "wins": matched_series["wins"].get(team_id, 0) if matched_series else 0,
+            "is_winner": bool(series_winner and series_winner == team_id),
+            "eliminated": bool(series_winner and series_winner != team_id),
         }
 
-    def make_series(slot: str, league: str | None, round_key: str, projected: list[str | None], raw: dict | None) -> dict:
-        ordered: list[str | None] = [None, None]
-        if raw:
-            actual = list(raw["ids"])
-            for i, pid in enumerate(projected):
-                if pid in actual:
-                    ordered[i] = pid
-            remaining = [x for x in actual if x not in ordered]
-            if round_key == "WS":
-                remaining.sort(key=lambda x: league_of(x) != "AL")
-            for i in range(2):
-                if ordered[i] is None and remaining:
-                    ordered[i] = remaining.pop(0)
+    def build_series_card(slot_code: str, league_code: str | None, round_code: str, projected_team_ids: list[str | None], matched_series: dict | None) -> dict:
+        ordered_team_ids: list[str | None] = [None, None]
+        if matched_series:
+            actual_team_ids = list(matched_series["ids"])
+            for position, projected_id in enumerate(projected_team_ids):
+                if projected_id in actual_team_ids:
+                    ordered_team_ids[position] = projected_id
+            unplaced_team_ids = [team_id for team_id in actual_team_ids if team_id not in ordered_team_ids]
+            if round_code == "WS":
+                unplaced_team_ids.sort(key=lambda team_id: resolve_league(team_id) != "AL")
+            for position in range(2):
+                if ordered_team_ids[position] is None and unplaced_team_ids:
+                    ordered_team_ids[position] = unplaced_team_ids.pop(0)
         else:
-            ordered = list(projected)
+            ordered_team_ids = list(projected_team_ids)
 
-        if not raw:
-            status = "pending"
-        elif raw["winner_id"]:
-            status = "final"
-        elif any(g["status"] == "live" for g in raw["games"]):
-            status = "live"
-        elif any(g["status"] == "final" for g in raw["games"]):
-            status = "in_progress"
+        if not matched_series:
+            series_status = "pending"
+        elif matched_series["winner_id"]:
+            series_status = "final"
+        elif any(series_game["status"] == "live" for series_game in matched_series["games"]):
+            series_status = "live"
+        elif any(series_game["status"] == "final" for series_game in matched_series["games"]):
+            series_status = "in_progress"
         else:
-            status = "scheduled"
+            series_status = "scheduled"
 
         return {
-            "id": f"{league}_{slot}" if league else slot,
-            "slot": slot,
-            "round": round_key,
-            "league": league,
-            "best_of": raw["best_of"] if raw else BEST_OF[round_key],
-            "status": status,
-            "teams": [team_entry(t, raw) for t in ordered],
-            "winner_id": raw["winner_id"] if raw else None,
-            "games": raw["games"] if raw else [],
+            "id": f"{league_code}_{slot_code}" if league_code else slot_code,
+            "slot": slot_code,
+            "round": round_code,
+            "league": league_code,
+            "best_of": matched_series["best_of"] if matched_series else BEST_OF[round_code],
+            "status": series_status,
+            "teams": [build_team_card(team_id, matched_series) for team_id in ordered_team_ids],
+            "winner_id": matched_series["winner_id"] if matched_series else None,
+            "games": matched_series["games"] if matched_series else [],
         }
 
-    champions: dict[str, str | None] = {}
-    for league in ("AL", "NL"):
-        by_seed = {s["seed"]: tid for tid, s in seeds.items() if s["league"] == league}
-        s1, s2, s3, s4, s5, s6 = (by_seed.get(n) for n in range(1, 7))
+    champions_by_league: dict[str, str | None] = {}
+    for league_code in ("AL", "NL"):
+        seeds_by_rank = {seed_info["seed"]: team_id for team_id, seed_info in seeds.items() if seed_info["league"] == league_code}
+        seed_1, seed_2, seed_3, seed_4, seed_5, seed_6 = (seeds_by_rank.get(rank) for rank in range(1, 7))
 
-        wc_a_raw = pick("WC", league, [s3, s6])
-        wc_b_raw = pick("WC", league, [s4, s5])
-        wc_a = make_series("WC_A", league, "WC", [s6, s3], wc_a_raw)
-        wc_b = make_series("WC_B", league, "WC", [s5, s4], wc_b_raw)
+        wildcard_a_raw = find_series_for_slot("WC", league_code, [seed_3, seed_6])
+        wildcard_b_raw = find_series_for_slot("WC", league_code, [seed_4, seed_5])
+        wildcard_a = build_series_card("WC_A", league_code, "WC", [seed_6, seed_3], wildcard_a_raw)
+        wildcard_b = build_series_card("WC_B", league_code, "WC", [seed_5, seed_4], wildcard_b_raw)
 
-        ds_a_raw = pick("DS", league, [s2])
-        ds_b_raw = pick("DS", league, [s1])
-        ds_a = make_series("DS_A", league, "DS", [wc_a["winner_id"], s2], ds_a_raw)
-        ds_b = make_series("DS_B", league, "DS", [wc_b["winner_id"], s1], ds_b_raw)
+        division_a_raw = find_series_for_slot("DS", league_code, [seed_2])
+        division_b_raw = find_series_for_slot("DS", league_code, [seed_1])
+        division_a = build_series_card("DS_A", league_code, "DS", [wildcard_a["winner_id"], seed_2], division_a_raw)
+        division_b = build_series_card("DS_B", league_code, "DS", [wildcard_b["winner_id"], seed_1], division_b_raw)
 
-        cs_raw = pick("CS", league, [ds_a["winner_id"], ds_b["winner_id"]], single=True)
-        cs = make_series("CS", league, "CS", [ds_a["winner_id"], ds_b["winner_id"]], cs_raw)
+        championship_raw = find_series_for_slot("CS", league_code, [division_a["winner_id"], division_b["winner_id"]], allow_first_available=True)
+        championship = build_series_card("CS", league_code, "CS", [division_a["winner_id"], division_b["winner_id"]], championship_raw)
 
-        champions[league] = cs["winner_id"]
-        payload["al" if league == "AL" else "nl"] = [wc_a, wc_b, ds_a, ds_b, cs]
+        champions_by_league[league_code] = championship["winner_id"]
+        payload["al" if league_code == "AL" else "nl"] = [wildcard_a, wildcard_b, division_a, division_b, championship]
 
-    ws_raw = pick("WS", None, [champions["AL"], champions["NL"]], single=True)
-    ws = make_series("WS", None, "WS", [champions["AL"], champions["NL"]], ws_raw)
-    payload["world_series"] = ws
-    if ws["winner_id"]:
-        winner = next((t for t in ws["teams"] if t and t["id"] == ws["winner_id"]), None)
-        payload["champion"] = winner
+    world_series_raw = find_series_for_slot("WS", None, [champions_by_league["AL"], champions_by_league["NL"]], allow_first_available=True)
+    world_series_card = build_series_card("WS", None, "WS", [champions_by_league["AL"], champions_by_league["NL"]], world_series_raw)
+    payload["world_series"] = world_series_card
+    if world_series_card["winner_id"]:
+        champion_card = next((team_card for team_card in world_series_card["teams"] if team_card and team_card["id"] == world_series_card["winner_id"]), None)
+        payload["champion"] = champion_card
     return payload
 
 
 def has_live_game(payload: dict) -> bool:
-    series = (payload.get("al") or []) + (payload.get("nl") or [])
+    bracket_series = (payload.get("al") or []) + (payload.get("nl") or [])
     if payload.get("world_series"):
-        series.append(payload["world_series"])
-    return any(s.get("status") == "live" for s in series)
+        bracket_series.append(payload["world_series"])
+    return any(series_entry.get("status") == "live" for series_entry in bracket_series)

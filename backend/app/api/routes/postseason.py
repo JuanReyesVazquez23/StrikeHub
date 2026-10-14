@@ -43,59 +43,59 @@ _STALE_MAX_SECONDS = 6 * 3600  # tope para servir datos viejos si la API falla
 # Primera temporada con el formato actual de 12 equipos (3 series de Wild Card por liga).
 _MIN_SEASON = 2022
 
-_cache: dict[int, dict] = {}
+_bracket_cache: dict[int, dict] = {}
 _standings_cache: dict[int, dict] = {}
-_locks: dict[int, asyncio.Lock] = {}
+_season_locks: dict[int, asyncio.Lock] = {}
 
 
-def _lock_for(year: int) -> asyncio.Lock:
-    lock = _locks.get(year)
-    if lock is None:
-        lock = _locks[year] = asyncio.Lock()
-    return lock
+def _season_lock(season_year: int) -> asyncio.Lock:
+    season_lock = _season_locks.get(season_year)
+    if season_lock is None:
+        season_lock = _season_locks[season_year] = asyncio.Lock()
+    return season_lock
 
 
-async def _get_standings(year: int) -> dict | None:
+async def _get_cached_standings(season_year: int) -> dict | None:
     """Posiciones de temporada regular (cacheadas 1 h). Tolera fallos: devuelve None."""
-    now = time.monotonic()
-    cached = _standings_cache.get(year)
-    if cached and cached["expires_at"] > now:
-        return cached["data"]
+    clock_now = time.monotonic()
+    cached_standings = _standings_cache.get(season_year)
+    if cached_standings and cached_standings["expires_at"] > clock_now:
+        return cached_standings["data"]
     try:
-        data = await mlb_service.get_standings(year)
+        standings_response = await mlb_service.get_standings(season_year)
     except Exception:
-        logger.exception("No se pudieron obtener las posiciones %d para los sembrados.", year)
-        return cached["data"] if cached else None
-    _standings_cache[year] = {"data": data, "expires_at": now + _STANDINGS_TTL_SECONDS}
-    return data
+        logger.exception("No se pudieron obtener las posiciones %d para los sembrados.", season_year)
+        return cached_standings["data"] if cached_standings else None
+    _standings_cache[season_year] = {"data": standings_response, "expires_at": clock_now + _STANDINGS_TTL_SECONDS}
+    return standings_response
 
 
-def _load_logos(db: Session) -> dict[str, str | None]:
+def _load_team_logos(database: Session) -> dict[str, str | None]:
     """Logos de equipos desde la BD. Si falla, el servicio usa el CDN de MLB."""
-    logos: dict[str, str | None] = {}
+    logo_by_team_id: dict[str, str | None] = {}
     try:
-        league = db.query(League).filter(League.key == "mlb").first()
-        if league:
-            for team in db.query(Team).filter(Team.league_id == league.id).all():
-                logos[str(team.external_id)] = team.logo_url
+        mlb_league = database.query(League).filter(League.key == "mlb").first()
+        if mlb_league:
+            for team_row in database.query(Team).filter(Team.league_id == mlb_league.id).all():
+                logo_by_team_id[str(team_row.external_id)] = team_row.logo_url
     except Exception:
         logger.exception("No se pudieron leer los logos de equipos de la BD.")
-    return logos
+    return logo_by_team_id
 
 
-async def _build_payload(year: int, db: Session) -> tuple[dict, int]:
-    schedule = await mlb_service.get_postseason_schedule(year)
-    has_games = any(day.get("games") for day in schedule.get("dates", []) or [])
-    standings = await _get_standings(year) if has_games else None
-    payload = build_bracket(schedule, standings, _load_logos(db) if has_games else {}, season=year)
+async def _assemble_bracket_payload(season_year: int, database: Session) -> tuple[dict, int]:
+    postseason_schedule = await mlb_service.get_postseason_schedule(season_year)
+    has_scheduled_games = any(schedule_day.get("games") for schedule_day in postseason_schedule.get("dates", []) or [])
+    regular_standings = await _get_cached_standings(season_year) if has_scheduled_games else None
+    bracket_payload = build_bracket(postseason_schedule, regular_standings, _load_team_logos(database) if has_scheduled_games else {}, season=season_year)
 
-    if not payload["postseason_active"]:
-        ttl = _TTL_INACTIVE_SECONDS
-    elif has_live_game(payload):
-        ttl = _TTL_LIVE_SECONDS
+    if not bracket_payload["postseason_active"]:
+        cache_ttl = _TTL_INACTIVE_SECONDS
+    elif has_live_game(bracket_payload):
+        cache_ttl = _TTL_LIVE_SECONDS
     else:
-        ttl = _TTL_IDLE_SECONDS
-    return payload, ttl
+        cache_ttl = _TTL_IDLE_SECONDS
+    return bracket_payload, cache_ttl
 
 
 @router.get("/bracket")
@@ -115,26 +115,26 @@ async def get_bracket(
     """
     enforce_rate_limit(request, bucket="postseason", limit=30, window_seconds=60)
 
-    year = season or datetime.now(timezone.utc).year
-    cached = _cache.get(year)
-    if cached and cached["expires_at"] > time.monotonic():
-        return cached["payload"]
+    season_year = season or datetime.now(timezone.utc).year
+    cached_bracket = _bracket_cache.get(season_year)
+    if cached_bracket and cached_bracket["expires_at"] > time.monotonic():
+        return cached_bracket["payload"]
 
     # Un solo refresco a la vez por temporada: evita varias llamadas idénticas a la MLB API.
-    async with _lock_for(year):
-        cached = _cache.get(year)
-        if cached and cached["expires_at"] > time.monotonic():
-            return cached["payload"]
+    async with _season_lock(season_year):
+        cached_bracket = _bracket_cache.get(season_year)
+        if cached_bracket and cached_bracket["expires_at"] > time.monotonic():
+            return cached_bracket["payload"]
         try:
-            payload, ttl = await _build_payload(year, db)
+            bracket_payload, cache_ttl = await _assemble_bracket_payload(season_year, db)
         except Exception:
-            logger.exception("No se pudo obtener la postemporada %d.", year)
-            if cached and time.monotonic() - cached["built_at"] < _STALE_MAX_SECONDS:
-                return {**cached["payload"], "stale": True}
+            logger.exception("No se pudo obtener la postemporada %d.", season_year)
+            if cached_bracket and time.monotonic() - cached_bracket["built_at"] < _STALE_MAX_SECONDS:
+                return {**cached_bracket["payload"], "stale": True}
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="No se pudo obtener la postemporada.",
             )
-        now = time.monotonic()
-        _cache[year] = {"payload": payload, "expires_at": now + ttl, "built_at": now}
-        return payload
+        clock_now = time.monotonic()
+        _bracket_cache[season_year] = {"payload": bracket_payload, "expires_at": clock_now + cache_ttl, "built_at": clock_now}
+        return bracket_payload

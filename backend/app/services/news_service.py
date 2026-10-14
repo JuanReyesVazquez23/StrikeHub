@@ -20,7 +20,7 @@ import httpx
 
 from app.core.config import settings
 
-from app.services.http_client import DEFAULT_HTTP_TIMEOUT as TIMEOUT
+from app.services.http_client import DEFAULT_HTTP_TIMEOUT as HTTP_TIMEOUT
 
 FEEDS_BY_SPORT = {
     "baseball": settings.NEWS_RSS_MLB,
@@ -29,10 +29,10 @@ FEEDS_BY_SPORT = {
 # Busca el primer <img src="..."> dentro de HTML (algunos feeds de ESPN
 # incrustan la imagen directamente en el resumen en vez de usar una etiqueta
 # de imagen aparte).
-_IMG_TAG_PATTERN = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
+_INLINE_IMAGE_PATTERN = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
 
 
-def _extract_image(entry: dict) -> str | None:
+def _extract_article_image(feed_entry: dict) -> str | None:
     """
     Busca la imagen real del artículo, probando las distintas formas en que
     un feed RSS puede exponerla, de la más específica a la más genérica:
@@ -40,37 +40,37 @@ def _extract_image(entry: dict) -> str | None:
     2) <enclosure> (método clásico de RSS, común en varios feeds de ESPN)
     3) una etiqueta <img> incrustada dentro del HTML del resumen
     """
-    if entry.get("media_content"):
-        return entry["media_content"][0].get("url")
-    if entry.get("media_thumbnail"):
-        return entry["media_thumbnail"][0].get("url")
+    if feed_entry.get("media_content"):
+        return feed_entry["media_content"][0].get("url")
+    if feed_entry.get("media_thumbnail"):
+        return feed_entry["media_thumbnail"][0].get("url")
 
-    for enclosure in entry.get("enclosures", []):
+    for enclosure in feed_entry.get("enclosures", []):
         if enclosure.get("type", "").startswith("image") or enclosure.get("href", "").lower().endswith(
             (".jpg", ".jpeg", ".png", ".webp")
         ):
             return enclosure.get("href")
 
-    for link in entry.get("links", []):
-        if link.get("type", "").startswith("image"):
-            return link.get("href")
+    for feed_link in feed_entry.get("links", []):
+        if feed_link.get("type", "").startswith("image"):
+            return feed_link.get("href")
 
-    summary_html = entry.get("summary", "")
-    match = _IMG_TAG_PATTERN.search(summary_html)
-    if match:
-        return match.group(1)
+    summary_markup = feed_entry.get("summary", "")
+    image_match = _INLINE_IMAGE_PATTERN.search(summary_markup)
+    if image_match:
+        return image_match.group(1)
 
     return None
 
 
-def _strip_html(html_text: str) -> str:
+def _strip_html(html_content: str) -> str:
     """Deja solo texto legible, sin etiquetas HTML. Nunca se inserta HTML de terceros sin sanear."""
-    text = re.sub(r"<[^>]+>", " ", html_text)
-    return re.sub(r"\s+", " ", text).strip()
+    text_only = re.sub(r"<[^>]+>", " ", html_content)
+    return re.sub(r"\s+", " ", text_only).strip()
 
 
-def _parse_date(entry: dict) -> datetime:
-    published = entry.get("published")
+def _parse_published_date(feed_entry: dict) -> datetime:
+    published = feed_entry.get("published")
     if published:
         try:
             return parsedate_to_datetime(published)
@@ -81,25 +81,25 @@ def _parse_date(entry: dict) -> datetime:
 
 async def fetch_rss_news(feed_url: str, limit: int = 15) -> list[dict]:
     """Descarga y parsea un feed RSS, devolviendo una lista de artículos normalizados."""
-    async with httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": "BFBDeportes/1.0"}) as client:
-        resp = await client.get(feed_url)
-        resp.raise_for_status()
-        raw = resp.content
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, headers={"User-Agent": "BFBDeportes/1.0"}) as client:
+        response = await client.get(feed_url)
+        response.raise_for_status()
+        response_body = response.content
 
-    parsed = feedparser.parse(raw)
-    articles = []
-    for entry in parsed.entries[:limit]:
-        articles.append(
+    parsed_feed = feedparser.parse(response_body)
+    normalized_articles = []
+    for feed_entry in parsed_feed.entries[:limit]:
+        normalized_articles.append(
             {
-                "title": entry.get("title", "").strip(),
-                "summary": _strip_html(entry.get("summary", "")).strip() or None,
-                "image_url": _extract_image(entry),
+                "title": feed_entry.get("title", "").strip(),
+                "summary": _strip_html(feed_entry.get("summary", "")).strip() or None,
+                "image_url": _extract_article_image(feed_entry),
                 "source": "ESPN",
-                "article_url": entry.get("link"),
-                "published_at": _parse_date(entry),
+                "article_url": feed_entry.get("link"),
+                "published_at": _parse_published_date(feed_entry),
             }
         )
-    return articles
+    return normalized_articles
 
 
 async def fetch_general_baseball_news(limit: int = 10) -> list[dict]:

@@ -14,7 +14,7 @@ from datetime import date
 import httpx
 
 from app.core.config import settings
-from app.services.http_client import DEFAULT_HTTP_TIMEOUT as TIMEOUT
+from app.services.http_client import DEFAULT_HTTP_HTTP_TIMEOUT as HTTP_HTTP_TIMEOUT
 
 MLB_SPORT_ID = 1  # id interno de MLB en statsapi.mlb.com (Grandes Ligas)
 
@@ -34,41 +34,41 @@ MLB_DIVISION_NAMES = {
 
 async def get_standings(season: int) -> dict:
     """Posiciones actuales de la MLB por división."""
-    url = f"{settings.MLB_STATS_API_BASE}/standings"
-    params = {"leagueId": "103,104", "season": season, "standingsTypes": "regularSeason"}
-    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        resp = await client.get(url, params=params)
-        resp.raise_for_status()
-        return resp.json()
+    endpoint_url = f"{settings.MLB_STATS_API_BASE}/standings"
+    query_params = {"leagueId": "103,104", "season": season, "standingsTypes": "regularSeason"}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        response = await client.get(endpoint_url, params=query_params)
+        response.raise_for_status()
+        return response.json()
 
 
-async def get_schedule(target_date: date) -> dict:
+async def get_schedule(game_date: date) -> dict:
     """
     Calendario/resultados del día indicado. Incluye pitchers probables y,
     si el juego ya inició/terminó, el linescore básico.
     """
-    url = f"{settings.MLB_STATS_API_BASE}/schedule"
-    params = {
+    endpoint_url = f"{settings.MLB_STATS_API_BASE}/schedule"
+    query_params = {
         "sportId": MLB_SPORT_ID,
-        "date": target_date.isoformat(),
+        "date": game_date.isoformat(),
         "hydrate": "team,linescore,probablePitcher,decisions",
     }
-    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        resp = await client.get(url, params=params)
-        resp.raise_for_status()
-        return resp.json()
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        response = await client.get(endpoint_url, params=query_params)
+        response.raise_for_status()
+        return response.json()
 
 
-async def get_live_feed(game_pk: int) -> dict:
+async def get_live_feed(mlb_game_id: int) -> dict:
     """
     Feed en vivo/boxscore completo de un juego: pitcher ganador, perdedor,
-    salvamento, líderes ofensivos, etc. game_pk es el id de juego de MLB.
+    salvamento, líderes ofensivos, etc. mlb_game_id es el id de juego de MLB.
     """
-    url = f"{settings.MLB_STATS_API_BASE.replace('/api/v1', '')}/api/v1.1/game/{game_pk}/feed/live"
-    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        return resp.json()
+    endpoint_url = f"{settings.MLB_STATS_API_BASE.replace('/api/v1', '')}/api/v1.1/game/{mlb_game_id}/feed/live"
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        response = await client.get(endpoint_url)
+        response.raise_for_status()
+        return response.json()
 
 
 async def get_postseason_schedule(season: int) -> dict:
@@ -78,17 +78,17 @@ async def get_postseason_schedule(season: int) -> dict:
     L = League Championship, W = World Series. Con seriesStatus hidratado
     (marcador de la serie: quién va ganando y por cuánto).
     """
-    url = f"{settings.MLB_STATS_API_BASE}/schedule"
-    params = {
+    endpoint_url = f"{settings.MLB_STATS_API_BASE}/schedule"
+    query_params = {
         "sportId": MLB_SPORT_ID,
         "season": season,
         "gameType": "F,D,L,W",
         "hydrate": "seriesStatus,team",
     }
-    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        resp = await client.get(url, params=params)
-        resp.raise_for_status()
-        return resp.json()
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        response = await client.get(endpoint_url, params=query_params)
+        response.raise_for_status()
+        return response.json()
 
 
 async def get_stat_leaders(season: int, category: str, limit: int = 5) -> dict:
@@ -98,17 +98,17 @@ async def get_stat_leaders(season: int, category: str, limit: int = 5) -> dict:
     devuelve pitchers con 2 turnos); solo categorías de conteo + ERA,
     que sí salen cuerdas. Ver LEADER_CATEGORIES en routes/stats.py.
     """
-    url = f"{settings.MLB_STATS_API_BASE}/stats/leaders"
-    params = {
+    endpoint_url = f"{settings.MLB_STATS_API_BASE}/stats/leaders"
+    query_params = {
         "leaderCategories": category,
         "sportId": MLB_SPORT_ID,
         "season": season,
         "limit": limit,
     }
-    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        resp = await client.get(url, params=params)
-        resp.raise_for_status()
-        return resp.json()
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        response = await client.get(endpoint_url, params=query_params)
+        response.raise_for_status()
+        return response.json()
 
 
 def extract_live_situation(live_feed: dict) -> dict:
@@ -121,17 +121,17 @@ def extract_live_situation(live_feed: dict) -> dict:
     (no vienen como null/false); por eso se detecta con bool(...) sobre la
     presencia de la clave, no comparando un valor.
     """
-    linescore = live_feed.get("liveData", {}).get("linescore", {})
-    offense = linescore.get("offense", {})
-    defense = linescore.get("defense", {})
+    linescore_data = live_feed.get("liveData", {}).get("linescore", {})
+    offense = linescore_data.get("offense", {})
+    defense = linescore_data.get("defense", {})
     current_play = live_feed.get("liveData", {}).get("plays", {}).get("currentPlay", {})
 
     return {
-        "inning": linescore.get("currentInning"),
-        "inning_half": linescore.get("inningHalf"),  # "Top" | "Bottom"
-        "outs": linescore.get("outs", 0),
-        "balls": linescore.get("balls", 0),
-        "strikes": linescore.get("strikes", 0),
+        "inning": linescore_data.get("currentInning"),
+        "inning_half": linescore_data.get("inningHalf"),  # "Top" | "Bottom"
+        "outs": linescore_data.get("outs", 0),
+        "balls": linescore_data.get("balls", 0),
+        "strikes": linescore_data.get("strikes", 0),
         "bases": {
             "first": bool(offense.get("first")),
             "second": bool(offense.get("second")),
@@ -144,21 +144,21 @@ def extract_live_situation(live_feed: dict) -> dict:
 
 
 async def get_teams(season: int) -> dict:
-    url = f"{settings.MLB_STATS_API_BASE}/teams"
-    params = {"sportId": MLB_SPORT_ID, "season": season}
-    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        resp = await client.get(url, params=params)
-        resp.raise_for_status()
-        return resp.json()
+    endpoint_url = f"{settings.MLB_STATS_API_BASE}/teams"
+    query_params = {"sportId": MLB_SPORT_ID, "season": season}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        response = await client.get(endpoint_url, params=query_params)
+        response.raise_for_status()
+        return response.json()
 
 
 async def get_team_roster(team_id: int, season: int) -> dict:
-    url = f"{settings.MLB_STATS_API_BASE}/teams/{team_id}/roster"
-    params = {"season": season}
-    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        resp = await client.get(url, params=params)
-        resp.raise_for_status()
-        return resp.json()
+    endpoint_url = f"{settings.MLB_STATS_API_BASE}/teams/{team_id}/roster"
+    query_params = {"season": season}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        response = await client.get(endpoint_url, params=query_params)
+        response.raise_for_status()
+        return response.json()
 
 
 async def get_player_season_stats(person_id: int, season: int) -> dict:
@@ -168,70 +168,70 @@ async def get_player_season_stats(person_id: int, season: int) -> dict:
     guarda en BD), así siempre está al día y no hace falta otra migración.
     Un bateador no tendrá datos de pitcheo y viceversa; eso es normal.
     """
-    url = f"{settings.MLB_STATS_API_BASE}/people/{person_id}/stats"
-    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        hitting_resp = await client.get(url, params={"stats": "season", "group": "hitting", "season": season})
-        pitching_resp = await client.get(url, params={"stats": "season", "group": "pitching", "season": season})
-    hitting_resp.raise_for_status()
-    pitching_resp.raise_for_status()
-    return {"hitting": hitting_resp.json(), "pitching": pitching_resp.json()}
+    endpoint_url = f"{settings.MLB_STATS_API_BASE}/people/{person_id}/stats"
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        hitting_response = await client.get(endpoint_url, params={"stats": "season", "group": "hitting", "season": season})
+        pitching_response = await client.get(endpoint_url, params={"stats": "season", "group": "pitching", "season": season})
+    hitting_response.raise_for_status()
+    pitching_response.raise_for_status()
+    return {"hitting": hitting_response.json(), "pitching": pitching_response.json()}
 
 
-def _first_split_stat(stats_response: dict) -> dict | None:
-    splits = (stats_response.get("stats") or [{}])[0].get("splits", [])
-    return splits[0]["stat"] if splits else None
+def _extract_first_split_stat(stats_response: dict) -> dict | None:
+    stat_splits = (stats_response.get("stats") or [{}])[0].get("splits", [])
+    return stat_splits[0]["stat"] if stat_splits else None
 
 
 def extract_batting_stats(hitting_response: dict) -> dict | None:
     """Devuelve None si el jugador no tiene estadísticas de bateo esta temporada (ej. es pitcher puro)."""
-    stat = _first_split_stat(hitting_response)
-    if not stat:
+    stat_entry = _extract_first_split_stat(hitting_response)
+    if not stat_entry:
         return None
     return {
-        "games": stat.get("gamesPlayed"),
-        "at_bats": stat.get("atBats"),
-        "hits": stat.get("hits"),
-        "home_runs": stat.get("homeRuns"),
-        "rbi": stat.get("rbi"),
-        "avg": stat.get("avg"),
-        "obp": stat.get("obp"),
-        "slg": stat.get("slg"),
-        "ops": stat.get("ops"),
-        "stolen_bases": stat.get("stolenBases"),
+        "games": stat_entry.get("gamesPlayed"),
+        "at_bats": stat_entry.get("atBats"),
+        "hits": stat_entry.get("hits"),
+        "home_runs": stat_entry.get("homeRuns"),
+        "rbi": stat_entry.get("rbi"),
+        "avg": stat_entry.get("avg"),
+        "obp": stat_entry.get("obp"),
+        "slg": stat_entry.get("slg"),
+        "ops": stat_entry.get("ops"),
+        "stolen_bases": stat_entry.get("stolenBases"),
     }
 
 
 def extract_pitching_stats(pitching_response: dict) -> dict | None:
     """Devuelve None si el jugador no tiene estadísticas de pitcheo esta temporada (ej. es bateador puro)."""
-    stat = _first_split_stat(pitching_response)
-    if not stat:
+    stat_entry = _extract_first_split_stat(pitching_response)
+    if not stat_entry:
         return None
     return {
-        "games": stat.get("gamesPlayed"),
-        "wins": stat.get("wins"),
-        "losses": stat.get("losses"),
-        "era": stat.get("era"),
-        "strikeouts": stat.get("strikeOuts"),
-        "saves": stat.get("saves"),
-        "innings_pitched": stat.get("inningsPitched"),
-        "whip": stat.get("whip"),
+        "games": stat_entry.get("gamesPlayed"),
+        "wins": stat_entry.get("wins"),
+        "losses": stat_entry.get("losses"),
+        "era": stat_entry.get("era"),
+        "strikeouts": stat_entry.get("strikeOuts"),
+        "saves": stat_entry.get("saves"),
+        "innings_pitched": stat_entry.get("inningsPitched"),
+        "whip": stat_entry.get("whip"),
     }
 
 
 def extract_probable_pitchers(schedule_game: dict) -> dict:
     """Extrae de un juego del /schedule los pitchers abridores probables (para 'Jugadores Hoy')."""
-    probables = schedule_game.get("teams", {})
+    team_sides = schedule_game.get("teams", {})
     return {
-        "home_pitcher": probables.get("home", {}).get("probablePitcher", {}).get("fullName"),
-        "away_pitcher": probables.get("away", {}).get("probablePitcher", {}).get("fullName"),
+        "home_pitcher": team_sides.get("home", {}).get("probablePitcher", {}).get("fullName"),
+        "away_pitcher": team_sides.get("away", {}).get("probablePitcher", {}).get("fullName"),
     }
 
 
 def extract_decisions(schedule_game: dict) -> dict:
     """Extrae pitcher ganador/perdedor/salvamento de un juego ya finalizado."""
-    decisions = schedule_game.get("decisions", {})
+    game_decisions = schedule_game.get("decisions", {})
     return {
-        "winning_pitcher": decisions.get("winner", {}).get("fullName"),
-        "losing_pitcher": decisions.get("loser", {}).get("fullName"),
-        "save_pitcher": decisions.get("save", {}).get("fullName"),
+        "winning_pitcher": game_decisions.get("winner", {}).get("fullName"),
+        "losing_pitcher": game_decisions.get("loser", {}).get("fullName"),
+        "save_pitcher": game_decisions.get("save", {}).get("fullName"),
     }

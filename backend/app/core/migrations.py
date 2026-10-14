@@ -29,7 +29,7 @@ logger = logging.getLogger("bfb.migrations")
 
 # Cada entrada es una sentencia SQL idempotente. Se agregan aquí a futuro
 # nuevas columnas que necesiten "parchear" tablas ya existentes.
-_LIGHTWEIGHT_MIGRATIONS = [
+_IDEMPOTENT_DDL_STATEMENTS = [
     "ALTER TABLE teams ADD COLUMN IF NOT EXISTS short_name VARCHAR(60)",
     "ALTER TABLE news_articles ADD COLUMN IF NOT EXISTS title_es VARCHAR(300)",
     "ALTER TABLE news_articles ADD COLUMN IF NOT EXISTS summary_es TEXT",
@@ -50,8 +50,8 @@ _LIGHTWEIGHT_MIGRATIONS = [
 ]
 
 
-def run_lightweight_migrations(engine: Engine) -> None:
-    with engine.begin() as conn:
-        for statement in _LIGHTWEIGHT_MIGRATIONS:
-            conn.execute(text(statement))
-    logger.info("Migraciones ligeras aplicadas correctamente (%d sentencias).", len(_LIGHTWEIGHT_MIGRATIONS))
+def run_lightweight_migrations(database_engine: Engine) -> None:
+    with database_engine.begin() as connection:
+        for ddl_statement in _IDEMPOTENT_DDL_STATEMENTS:
+            connection.execute(text(ddl_statement))
+    logger.info("Migraciones ligeras aplicadas correctamente (%d sentencias).", len(_IDEMPOTENT_DDL_STATEMENTS))

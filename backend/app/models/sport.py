@@ -59,6 +59,8 @@ class League(Base):
 
 
 class Team(Base):
+    """Franquicia real de una liga (ej. Yankees en MLB). Los placeholders del All-Star se excluyen en consultas."""
+
     __tablename__ = "teams"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -92,6 +94,8 @@ class Team(Base):
 
 
 class Player(Base):
+    """Jugador del roster activo de un equipo (sincronizado desde la API externa)."""
+
     __tablename__ = "players"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -109,6 +113,8 @@ class Player(Base):
 
 
 class Game(Base):
+    """Partido entre dos franquicias reales: scheduled | live | final | postponed."""
+
     __tablename__ = "games"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

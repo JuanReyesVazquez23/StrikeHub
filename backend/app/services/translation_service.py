@@ -20,15 +20,15 @@ logger = logging.getLogger("bfb.translation")
 # Límite práctico por texto: motores gratuitos de traducción suelen tener
 # un límite de caracteres por request (ej. 5000). Un titular o resumen de
 # noticia nunca se acerca a esto, es solo una salvaguarda.
-_MAX_CHARS = 4500
+MAX_TRANSLATABLE_CHARS = 4500
 
 
-def _via_google(text: str) -> str | None:
-    return GoogleTranslator(source="en", target="es").translate(text)
+def _translate_via_google(source_text: str) -> str | None:
+    return GoogleTranslator(source="en", target="es").translate(source_text)
 
 
-def _via_mymemory(text: str) -> str | None:
-    return MyMemoryTranslator(source="en", target="es").translate(text)
+def _translate_via_mymemory(source_text: str) -> str | None:
+    return MyMemoryTranslator(source="en", target="es").translate(source_text)
 
 
 def translate_to_spanish(text: str | None) -> str | None:
@@ -42,14 +42,18 @@ def translate_to_spanish(text: str | None) -> str | None:
     """
     if not text:
         return None
-    clean = text[:_MAX_CHARS]
-    for engine_name, engine in (("google", _via_google), ("mymemory", _via_mymemory)):
+    source_snippet = text[:MAX_TRANSLATABLE_CHARS]
+    for provider_name, provider in (("google", _translate_via_google), ("mymemory", _translate_via_mymemory)):
         try:
-            out = engine(clean)
-            if out and out.strip() and out.strip().lower() != clean.strip().lower():
-                return out
+            translated_text = provider(source_snippet)
+            if (
+                translated_text
+                and translated_text.strip()
+                and translated_text.strip().lower() != source_snippet.strip().lower()
+            ):
+                return translated_text
         except Exception:
-            logger.info("Motor de traducción '%s' falló; probando el siguiente.", engine_name)
+            logger.info("Motor de traducción '%s' falló; probando el siguiente.", provider_name)
             continue
     logger.warning("No se pudo traducir un texto al español; se usará el original en inglés como respaldo.")
     return None

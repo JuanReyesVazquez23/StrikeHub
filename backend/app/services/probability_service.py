@@ -52,14 +52,14 @@ def estimate_home_win_probability(
     if away_recent_form is not None:
         away_strength = (1 - RECENT_FORM_WEIGHT) * away_win_pct + RECENT_FORM_WEIGHT * away_recent_form
 
-    total = home_strength + away_strength
-    if total <= 0:
-        base = 0.5
+    season_total = home_strength + away_strength
+    if season_total <= 0:
+        base_probability = 0.5
     else:
-        base = home_strength / total
+        base_probability = home_strength / season_total
 
-    probability = base + HOME_ADVANTAGE
-    return max(0.05, min(0.95, probability))
+    adjusted_probability = base_probability + HOME_ADVANTAGE
+    return max(0.05, min(0.95, adjusted_probability))
 
 
 def implied_probability_from_odds(decimal_odds: float) -> float:
@@ -70,11 +70,11 @@ def implied_probability_from_odds(decimal_odds: float) -> float:
 
 
 # >1 separa más los puntos entre ambos equipos cerca del 50/50 (ver
-# _skew_probability_for_points); 1.0 = lineal, sin separación extra.
+# _apply_points_curve); 1.0 = lineal, sin separación extra.
 POINTS_CURVE_STRENGTH = 1.8
 
 
-def _skew_probability_for_points(p: float, strength: float = POINTS_CURVE_STRENGTH) -> float:
+def _apply_points_curve(probability: float, curve_strength: float = POINTS_CURVE_STRENGTH) -> float:
     """
     Antes de convertir una probabilidad en puntos, la aleja un poco más de
     su punto medio (0.5). Con la fórmula lineal simple, un partido
@@ -90,10 +90,10 @@ def _skew_probability_for_points(p: float, strength: float = POINTS_CURVE_STRENG
     puede ganar; esto solo hace que el premio/castigo se sienta más
     diferenciado entre las dos opciones.
     """
-    centered = (p - 0.5) * 2  # -1 (0%) a 1 (100%)
-    sign = 1.0 if centered >= 0 else -1.0
-    skewed = sign * (abs(centered) ** (1 / strength))
-    return max(0.0, min(1.0, skewed / 2 + 0.5))
+    centered = (probability - 0.5) * 2  # -1 (0%) a 1 (100%)
+    direction = 1.0 if centered >= 0 else -1.0
+    curved = direction * (abs(centered) ** (1 / curve_strength))
+    return max(0.0, min(1.0, curved / 2 + 0.5))
 
 
 def points_for_prediction(probability_of_chosen_team: float) -> int:
@@ -104,11 +104,11 @@ def points_for_prediction(probability_of_chosen_team: float) -> int:
     probability = 0.95 (muy probable que gane) -> puntos cercanos al mínimo
     probability = 0.05 (muy improbable que gane) -> puntos cercanos al máximo
     """
-    p = _skew_probability_for_points(max(0.0, min(1.0, probability_of_chosen_team)))
-    min_pts, max_pts = settings.BET_MIN_POINTS, settings.BET_MAX_POINTS
+    curved_probability = _apply_points_curve(max(0.0, min(1.0, probability_of_chosen_team)))
+    min_points, max_points = settings.BET_MIN_POINTS, settings.BET_MAX_POINTS
 
-    points = max_pts - (max_pts - min_pts) * p
-    return round(max(min_pts, min(max_pts, points)))
+    points = max_points - (max_points - min_points) * curved_probability
+    return round(max(min_points, min(max_points, points)))
 
 
 def points_lost_for_prediction(probability_of_chosen_team: float) -> int:
@@ -124,8 +124,8 @@ def points_lost_for_prediction(probability_of_chosen_team: float) -> int:
     probability = 0.95 (muy probable que gane, y aun así pierde) -> pérdida cercana al máximo
     probability = 0.05 (muy improbable que gane, y en efecto pierde) -> pérdida cercana al mínimo
     """
-    p = _skew_probability_for_points(max(0.0, min(1.0, probability_of_chosen_team)))
-    min_pts, max_pts = settings.BET_MIN_POINTS, settings.BET_MAX_POINTS
+    curved_probability = _apply_points_curve(max(0.0, min(1.0, probability_of_chosen_team)))
+    min_points, max_points = settings.BET_MIN_POINTS, settings.BET_MAX_POINTS
 
-    points = min_pts + (max_pts - min_pts) * p
-    return round(max(min_pts, min(max_pts, points)))
+    points = min_points + (max_points - min_points) * curved_probability
+    return round(max(min_points, min(max_points, points)))

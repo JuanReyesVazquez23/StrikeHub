@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PredictionCreate(BaseModel):
@@ -9,6 +9,8 @@ class PredictionCreate(BaseModel):
 
 
 class PredictionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     game_id: int
     predicted_team_id: int
@@ -17,6 +19,3 @@ class PredictionOut(BaseModel):
     points_awarded: int
     created_at: datetime
     resolved_at: datetime | None
-
-    class Config:
-        from_attributes = True

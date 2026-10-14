@@ -11,15 +11,15 @@ from app.schemas.favorite import FavoriteCreate, FavoriteOut
 router = APIRouter(prefix="/favorites", tags=["favorites"])
 
 
-def _validate_target_exists(db: Session, favorite_type: str, target_id: int) -> None:
-    model_map = {"team": Team, "player": Player, "league": League}
-    model = model_map[favorite_type]
-    target = db.get(model, target_id)
-    if not target:
+def _ensure_favorite_target_exists(database: Session, favorite_type: str, target_id: int) -> None:
+    model_by_type = {"team": Team, "player": Player, "league": League}
+    target_model = model_by_type[favorite_type]
+    favorite_target = database.get(target_model, target_id)
+    if not favorite_target:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{favorite_type} no encontrado.")
     # Los placeholders (ej. "American League" del All-Star) no son equipos
     # reales: no tiene sentido favoritarlos y ensucian el perfil.
-    if favorite_type == "team" and getattr(target, "is_placeholder", False):
+    if favorite_type == "team" and getattr(favorite_target, "is_placeholder", False):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ese equipo no se puede marcar como favorito.")
 
 
@@ -34,7 +34,7 @@ def add_favorite(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _validate_target_exists(db, payload.favorite_type, payload.target_id)
+    _ensure_favorite_target_exists(db, payload.favorite_type, payload.target_id)
 
     favorite = Favorite(
         user_id=current_user.id,

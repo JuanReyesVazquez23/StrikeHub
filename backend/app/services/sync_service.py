@@ -36,21 +36,21 @@ logger = logging.getLogger("bfb.sync")
 CURRENT_MLB_SEASON = datetime.now(timezone.utc).year
 
 
-def _get_or_create_sport(db: Session, key: str, name_es: str, name_en: str) -> Sport:
-    sport = db.query(Sport).filter(Sport.key == key).first()
+def _get_or_create_sport(db: Session, sport_key: str, spanish_name: str, english_name: str) -> Sport:
+    sport = db.query(Sport).filter(Sport.key == sport_key).first()
     if not sport:
-        sport = Sport(key=key, name_es=name_es, name_en=name_en)
+        sport = Sport(key=sport_key, name_es=spanish_name, name_en=english_name)
         db.add(sport)
         db.commit()
         db.refresh(sport)
     return sport
 
 
-def _get_or_create_league(db: Session, sport: Sport, key: str, name: str, provider: str, is_primary=False) -> League:
-    league = db.query(League).filter(League.key == key).first()
+def _get_or_create_league(db: Session, sport: Sport, league_key: str, league_name: str, provider: str, is_primary=False) -> League:
+    league = db.query(League).filter(League.key == league_key).first()
     if not league:
         league = League(
-            sport_id=sport.id, key=key, name=name, is_primary=is_primary, data_provider=provider
+            sport_id=sport.id, key=league_key, name=league_name, is_primary=is_primary, data_provider=provider
         )
         db.add(league)
         db.commit()
@@ -82,29 +82,29 @@ async def sync_mlb_teams_and_standings() -> None:
             logger.info("Liga '%s' desactivada desde el panel de admin; se omite su sincronización.", league.key)
             return
 
-        standings_data = await mlb_service.get_standings(CURRENT_MLB_SEASON)
+        standings_response = await mlb_service.get_standings(CURRENT_MLB_SEASON)
 
         # El endpoint de standings solo trae "name" (nombre completo, ej.
         # "New York Yankees"). Para el nombre corto ("Yankees"), la
         # abreviación ("NYY") y la ciudad, se necesita el endpoint /teams.
-        teams_data = await mlb_service.get_teams(CURRENT_MLB_SEASON)
-        team_details_by_id = {str(t["id"]): t for t in teams_data.get("teams", [])}
+        teams_response = await mlb_service.get_teams(CURRENT_MLB_SEASON)
+        team_details_by_external_id = {str(team_payload["id"]): team_payload for team_payload in teams_response.get("teams", [])}
 
         valid_external_ids: set[str] = set()
         excluded_ids = {
             e.external_id for e in db.query(ExcludedTeam).filter(ExcludedTeam.league_id == league.id).all()
         }
-        for record in standings_data.get("records", []):
-            division_id = record.get("division", {}).get("id")
+        for division_record in standings_response.get("records", []):
+            division_id = division_record.get("division", {}).get("id")
             division_name = mlb_service.MLB_DIVISION_NAMES.get(division_id)
 
-            for team_record in record.get("teamRecords", []):
-                team_info = team_record["team"]
-                external_id = str(team_info["id"])
+            for team_standing in division_record.get("teamRecords", []):
+                standing_team_info = team_standing["team"]
+                external_id = str(standing_team_info["id"])
                 if external_id in excluded_ids:
                     continue  # borrado a mano por el panel de admin; nunca se recrea
                 valid_external_ids.add(external_id)
-                details = team_details_by_id.get(external_id, {})
+                team_details = team_details_by_external_id.get(external_id, {})
 
                 team = (
                     db.query(Team)
@@ -112,22 +112,22 @@ async def sync_mlb_teams_and_standings() -> None:
                     .first()
                 )
                 if not team:
-                    team = Team(league_id=league.id, external_id=external_id, name=team_info["name"])
+                    team = Team(league_id=league.id, external_id=external_id, name=standing_team_info["name"])
                     db.add(team)
 
-                wins = team_record.get("wins", 0)
-                losses = team_record.get("losses", 0)
-                total = wins + losses
-                team.name = team_info["name"]
-                team.short_name = details.get("teamName")  # ej. "Yankees"
-                team.abbreviation = details.get("abbreviation")  # ej. "NYY"
-                team.city = details.get("locationName")  # ej. "New York"
+                wins = team_standing.get("wins", 0)
+                losses = team_standing.get("losses", 0)
+                games_played = wins + losses
+                team.name = standing_team_info["name"]
+                team.short_name = team_details.get("teamName")  # ej. "Yankees"
+                team.abbreviation = team_details.get("abbreviation")  # ej. "NYY"
+                team.city = team_details.get("locationName")  # ej. "New York"
                 # Logo oficial de MLB: patrón de CDN público y estable, confirmado
                 # contra datos reales usados por la propia comunidad de MLB.
                 team.logo_url = f"https://www.mlbstatic.com/team-logos/{external_id}.svg"
                 team.wins = wins
                 team.losses = losses
-                team.win_pct = round(wins / total, 3) if total else 0.0
+                team.win_pct = round(wins / games_played, 3) if games_played else 0.0
                 team.division = division_name
                 team.is_placeholder = False
                 team.standings_updated_at = datetime.now(timezone.utc)
@@ -138,11 +138,11 @@ async def sync_mlb_teams_and_standings() -> None:
         # que hayan quedado guardados de una sincronización anterior a este
         # arreglo — is_placeholder ya no alcanza por sí solo si esos registros
         # se crearon antes de que existiera esa bandera).
-        removed = _prune_stale_teams(db, league, valid_external_ids)
-        if removed:
+        pruned_team_count = _prune_stale_teams(db, league, valid_external_ids)
+        if pruned_team_count:
             logger.info(
                 "Se eliminaron %d equipo(s) de 'mlb' que no son franquicias reales (ej. Juego de Estrellas).",
-                removed,
+                pruned_team_count,
             )
 
         db.commit()
@@ -151,7 +151,7 @@ async def sync_mlb_teams_and_standings() -> None:
         db.close()
 
 
-def _extract_mlb_score(game_data: dict, side: str) -> int | None:
+def _extract_team_runs(schedule_game: dict, team_side: str) -> int | None:
     """
     Extrae el marcador real de un lado ("home" o "away") de un juego de MLB.
 
@@ -161,11 +161,11 @@ def _extract_mlb_score(game_data: dict, side: str) -> int | None:
     para partidos finalizados, pero se quedaba en 0 durante partidos en vivo,
     que era la causa del bug reportado de "siempre 0-0").
     """
-    linescore_teams = (game_data.get("linescore") or {}).get("teams") or {}
-    runs = linescore_teams.get(side, {}).get("runs")
-    if runs is not None:
-        return runs
-    return game_data.get("teams", {}).get(side, {}).get("score")
+    linescore_sides = (schedule_game.get("linescore") or {}).get("teams") or {}
+    side_runs = linescore_sides.get(team_side, {}).get("runs")
+    if side_runs is not None:
+        return side_runs
+    return schedule_game.get("teams", {}).get(team_side, {}).get("score")
 
 
 async def sync_mlb_games(target_date: date | None = None) -> None:
@@ -178,28 +178,28 @@ async def sync_mlb_games(target_date: date | None = None) -> None:
             logger.info("Liga '%s' desactivada desde el panel de admin; se omite su sincronización.", league.key)
             return
 
-        base_date = target_date or datetime.now(timezone.utc).date()
+        reference_date = target_date or datetime.now(timezone.utc).date()
         # Se sincroniza "ayer" y "hoy" (no solo hoy): un juego de la Costa Oeste
         # que empieza tarde en hora local puede caer en el día siguiente en UTC,
         # y sin esto ese juego nunca se guardaba en la base de datos.
         # También se incluye "mañana": sin esto, partidos próximos (para
         # predecir, o eventos especiales como el Juego de Estrellas) no
         # aparecían hasta el mismo día.
-        dates_to_sync = {base_date - timedelta(days=1), base_date, base_date + timedelta(days=1)}
+        dates_to_sync = {reference_date - timedelta(days=1), reference_date, reference_date + timedelta(days=1)}
 
         # Auto-corrección: cualquier juego que sigue marcado "live" en la BD
         # pero es de una fecha que ya no cae en la ventana de arriba nunca se
         # vuelve a tocar, y se queda "en vivo" para siempre aunque ya haya
         # terminado hace días. Se agregan esas fechas para forzar su corrección.
-        stale_live_dates = {
-            g.start_time.date()
-            for g in db.query(Game).filter(Game.league_id == league.id, Game.status == "live").all()
+        orphaned_live_game_dates = {
+            live_game.start_time.date()
+            for live_game in db.query(Game).filter(Game.league_id == league.id, Game.status == "live").all()
         }
-        dates_to_sync |= stale_live_dates
+        dates_to_sync |= orphaned_live_game_dates
 
         for sync_date in sorted(dates_to_sync):
-            schedule = await mlb_service.get_schedule(sync_date)
-            _process_mlb_schedule(db, league, schedule)
+            daily_schedule = await mlb_service.get_schedule(sync_date)
+            _upsert_games_from_schedule(db, league, daily_schedule)
 
         db.commit()
         logger.info("Calendario de MLB sincronizado (%d fecha(s)).", len(dates_to_sync))
@@ -207,22 +207,22 @@ async def sync_mlb_games(target_date: date | None = None) -> None:
         db.close()
 
 
-def _process_mlb_schedule(db, league, schedule: dict) -> None:
+def _upsert_games_from_schedule(db, league, daily_schedule: dict) -> None:
     """Procesa un calendario (un solo día) de la MLB Stats API y actualiza/crea los juegos en BD."""
-    for day in schedule.get("dates", []):
-        for game_data in day.get("games", []):
-            external_id = str(game_data["gamePk"])
-            home_info = game_data["teams"]["home"]["team"]
-            away_info = game_data["teams"]["away"]["team"]
+    for schedule_day in daily_schedule.get("dates", []):
+        for schedule_game in schedule_day.get("games", []):
+            external_game_id = str(schedule_game["gamePk"])
+            home_team_info = schedule_game["teams"]["home"]["team"]
+            away_team_info = schedule_game["teams"]["away"]["team"]
 
             home_team = (
                 db.query(Team)
-                .filter(Team.league_id == league.id, Team.external_id == str(home_info["id"]))
+                .filter(Team.league_id == league.id, Team.external_id == str(home_team_info["id"]))
                 .first()
             )
             away_team = (
                 db.query(Team)
-                .filter(Team.league_id == league.id, Team.external_id == str(away_info["id"]))
+                .filter(Team.league_id == league.id, Team.external_id == str(away_team_info["id"]))
                 .first()
             )
             # Si alguno de los dos "equipos" no existe ya como franquicia real
@@ -239,51 +239,51 @@ def _process_mlb_schedule(db, league, schedule: dict) -> None:
 
             game = (
                 db.query(Game)
-                .filter(Game.league_id == league.id, Game.external_id == external_id)
+                .filter(Game.league_id == league.id, Game.external_id == external_game_id)
                 .first()
             )
             if not game:
                 game = Game(
                     league_id=league.id,
-                    external_id=external_id,
+                    external_id=external_game_id,
                     home_team_id=home_team.id,
                     away_team_id=away_team.id,
-                    start_time=datetime.fromisoformat(game_data["gameDate"].replace("Z", "+00:00")),
+                    start_time=datetime.fromisoformat(schedule_game["gameDate"].replace("Z", "+00:00")),
                 )
                 db.add(game)
 
-            raw_status = game_data.get("status", {}).get("abstractGameState", "Preview")
-            status_map = {"Preview": "scheduled", "Live": "live", "Final": "final"}
-            game.status = status_map.get(raw_status, "scheduled")
+            raw_status = schedule_game.get("status", {}).get("abstractGameState", "Preview")
+            status_mapping = {"Preview": "scheduled", "Live": "live", "Final": "final"}
+            game.status = status_mapping.get(raw_status, "scheduled")
 
-            game.home_score = _extract_mlb_score(game_data, "home")
-            game.away_score = _extract_mlb_score(game_data, "away")
-            game.venue = game_data.get("venue", {}).get("name")
+            game.home_score = _extract_team_runs(schedule_game, "home")
+            game.away_score = _extract_team_runs(schedule_game, "away")
+            game.venue = schedule_game.get("venue", {}).get("name")
 
             if game.status == "scheduled" and game.home_win_probability is None:
-                home_form = _recent_form_win_pct(db, home_team.id)
-                away_form = _recent_form_win_pct(db, away_team.id)
+                home_recent_form = _compute_recent_win_pct(db, home_team.id)
+                away_recent_form = _compute_recent_win_pct(db, away_team.id)
                 game.home_win_probability = estimate_home_win_probability(
-                    home_team.win_pct or 0.5, away_team.win_pct or 0.5, home_form, away_form
+                    home_team.win_pct or 0.5, away_team.win_pct or 0.5, home_recent_form, away_recent_form
                 )
 
-            details = game.details or {}
+            game_details = game.details or {}
             if game.status == "scheduled":
-                details.update(mlb_service.extract_probable_pitchers(game_data))
+                game_details.update(mlb_service.extract_probable_pitchers(schedule_game))
             elif game.status == "final":
-                details.update(mlb_service.extract_decisions(game_data))
-                linescore = game_data.get("linescore", {})
-                details["innings_played"] = linescore.get("currentInning")
+                game_details.update(mlb_service.extract_decisions(schedule_game))
+                linescore_data = schedule_game.get("linescore", {})
+                game_details["innings_played"] = linescore_data.get("currentInning")
             elif game.status == "live":
-                linescore = game_data.get("linescore", {})
-                game.period_status = f"Inning {linescore.get('currentInning', '?')}"
-            game.details = details
+                linescore_data = schedule_game.get("linescore", {})
+                game.period_status = f"Inning {linescore_data.get('currentInning', '?')}"
+            game.details = game_details
             game.last_synced_at = datetime.now(timezone.utc)
 
 
-def _recent_form_win_pct(db: Session, team_id: int, num_games: int = 10) -> float | None:
+def _compute_recent_win_pct(db: Session, team_id: int, game_count: int = 10) -> float | None:
     """
-    % de victorias del equipo en sus últimos `num_games` partidos ya
+    % de victorias del equipo en sus últimos `game_count` partidos ya
     jugados (los más recientes primero). Un empate cuenta como partido
     jugado sin sumar victoria (así se ignoran en fútbol en vez de tratarlos
     como derrota).
@@ -292,46 +292,46 @@ def _recent_form_win_pct(db: Session, team_id: int, num_games: int = 10) -> floa
     inventar una "racha" a partir de cero datos; quien llama a esto debe
     entonces usar solo el récord de temporada.
     """
-    recent_games = (
+    finished_games = (
         db.query(Game)
         .filter(
             (Game.home_team_id == team_id) | (Game.away_team_id == team_id),
             Game.status == "final",
         )
         .order_by(Game.start_time.desc())
-        .limit(num_games)
+        .limit(game_count)
         .all()
     )
 
-    wins = 0
-    played = 0
-    for g in recent_games:
-        if g.home_score is None or g.away_score is None:
+    win_count = 0
+    decided_games = 0
+    for finished_game in finished_games:
+        if finished_game.home_score is None or finished_game.away_score is None:
             continue
-        team_is_home = g.home_team_id == team_id
-        team_score = g.home_score if team_is_home else g.away_score
-        opp_score = g.away_score if team_is_home else g.home_score
-        played += 1
-        if team_score > opp_score:
-            wins += 1
+        is_home_game = finished_game.home_team_id == team_id
+        side_runs = finished_game.home_score if is_home_game else finished_game.away_score
+        opponent_runs = finished_game.away_score if is_home_game else finished_game.home_score
+        decided_games += 1
+        if side_runs > opponent_runs:
+            win_count += 1
 
-    return wins / played if played else None
+    return win_count / decided_games if decided_games else None
 
 
-def delete_players_cascade(db: Session, player_ids: list[int]) -> int:
+def delete_players_cascade(db: Session, stale_player_ids: list[int]) -> int:
     """
     Borra los jugadores indicados junto con los favoritos que apunten a
     ellos (para no violar la llave foránea). Se usa en la limpieza de
     rosters (jugadores que ya no están en el roster activo) y se puede
     reutilizar donde haga falta borrar jugadores.
     """
-    if not player_ids:
+    if not stale_player_ids:
         return 0
-    db.query(Favorite).filter(Favorite.player_id.in_(player_ids)).delete(synchronize_session=False)
-    return db.query(Player).filter(Player.id.in_(player_ids)).delete(synchronize_session=False)
+    db.query(Favorite).filter(Favorite.player_id.in_(stale_player_ids)).delete(synchronize_session=False)
+    return db.query(Player).filter(Player.id.in_(stale_player_ids)).delete(synchronize_session=False)
 
 
-def delete_teams_cascade(db: Session, team_ids: list[int]) -> int:
+def delete_teams_cascade(db: Session, stale_team_ids: list[int]) -> int:
     """
     Borra los equipos indicados junto con todo lo que depende de ellos, en
     el orden correcto para no violar llaves foráneas: favoritos directos,
@@ -342,32 +342,32 @@ def delete_teams_cascade(db: Session, team_ids: list[int]) -> int:
     Se usa tanto en la limpieza automática de sincronización como en el
     panel de administración para borrar equipos incorrectos a mano.
     """
-    if not team_ids:
+    if not stale_team_ids:
         return 0
 
     # Favoritos que apuntan directo a alguno de estos equipos.
-    db.query(Favorite).filter(Favorite.team_id.in_(team_ids)).delete(synchronize_session=False)
+    db.query(Favorite).filter(Favorite.team_id.in_(stale_team_ids)).delete(synchronize_session=False)
 
     # Jugadores de estos equipos (y los favoritos que apunten a esos jugadores).
-    player_ids = [p.id for p in db.query(Player).filter(Player.team_id.in_(team_ids)).all()]
-    if player_ids:
-        db.query(Favorite).filter(Favorite.player_id.in_(player_ids)).delete(synchronize_session=False)
-        db.query(Player).filter(Player.id.in_(player_ids)).delete(synchronize_session=False)
+    roster_player_ids = [player_row.id for player_row in db.query(Player).filter(Player.team_id.in_(stale_team_ids)).all()]
+    if roster_player_ids:
+        db.query(Favorite).filter(Favorite.player_id.in_(roster_player_ids)).delete(synchronize_session=False)
+        db.query(Player).filter(Player.id.in_(roster_player_ids)).delete(synchronize_session=False)
 
     # Partidos de estos equipos: se borran uno por uno (no en bloque) para
     # que SQLAlchemy dispare el cascade Game -> Prediction ya definido en el
     # modelo (un borrado en bloque no dispara cascades del ORM).
-    games = (
+    affected_games = (
         db.query(Game)
-        .filter((Game.home_team_id.in_(team_ids)) | (Game.away_team_id.in_(team_ids)))
+        .filter((Game.home_team_id.in_(stale_team_ids)) | (Game.away_team_id.in_(stale_team_ids)))
         .all()
     )
-    for game in games:
-        db.delete(game)
+    for affected_game in affected_games:
+        db.delete(affected_game)
     db.flush()
 
-    deleted = db.query(Team).filter(Team.id.in_(team_ids)).delete(synchronize_session=False)
-    return deleted
+    deleted_team_count = db.query(Team).filter(Team.id.in_(stale_team_ids)).delete(synchronize_session=False)
+    return deleted_team_count
 
 
 def _prune_stale_teams(db: Session, league: League, valid_external_ids: set[str]) -> int:
@@ -383,13 +383,13 @@ def _prune_stale_teams(db: Session, league: League, valid_external_ids: set[str]
     if not valid_external_ids:
         return 0
 
-    stale_team_ids = [
-        t.id
-        for t in db.query(Team)
+    orphaned_team_ids = [
+        team_row.id
+        for team_row in db.query(Team)
         .filter(Team.league_id == league.id, Team.external_id.notin_(valid_external_ids))
         .all()
     ]
-    return delete_teams_cascade(db, stale_team_ids)
+    return delete_teams_cascade(db, orphaned_team_ids)
 
 
 async def sync_mlb_rosters() -> None:
@@ -410,29 +410,29 @@ async def sync_mlb_rosters() -> None:
         teams = db.query(Team).filter(Team.league_id == league.id).all()
         for team in teams:
             try:
-                roster_data = await mlb_service.get_team_roster(int(team.external_id), CURRENT_MLB_SEASON)
+                roster_response = await mlb_service.get_team_roster(int(team.external_id), CURRENT_MLB_SEASON)
             except Exception:
                 logger.exception("No se pudo obtener el roster del equipo '%s'.", team.name)
                 continue
 
-            for entry in roster_data.get("roster", []):
-                person = entry.get("person", {})
-                external_id = str(person.get("id", ""))
-                if not external_id:
+            for roster_entry in roster_response.get("roster", []):
+                person_payload = roster_entry.get("person", {})
+                external_player_id = str(person_payload.get("id", ""))
+                if not external_player_id:
                     continue
 
                 player = (
                     db.query(Player)
-                    .filter(Player.team_id == team.id, Player.external_id == external_id)
+                    .filter(Player.team_id == team.id, Player.external_id == external_player_id)
                     .first()
                 )
                 if not player:
-                    player = Player(team_id=team.id, external_id=external_id, full_name=person.get("fullName", ""))
+                    player = Player(team_id=team.id, external_id=external_player_id, full_name=person_payload.get("fullName", ""))
                     db.add(player)
 
-                player.full_name = person.get("fullName") or player.full_name
-                player.position = entry.get("position", {}).get("abbreviation")
-                player.jersey_number = entry.get("jerseyNumber")
+                player.full_name = person_payload.get("fullName") or player.full_name
+                player.position = roster_entry.get("position", {}).get("abbreviation")
+                player.jersey_number = roster_entry.get("jerseyNumber")
 
         db.commit()
         logger.info("Roster de MLB sincronizado (%d equipos).", len(teams))
@@ -448,42 +448,42 @@ def resolve_finished_predictions() -> None:
     """
     db = SessionLocal()
     try:
-        pending = (
+        unresolved_predictions = (
             db.query(Prediction)
             .join(Game, Prediction.game_id == Game.id)
             .filter(Prediction.status == "pending", Game.status == "final")
             .all()
         )
-        resolved_count = 0
-        for prediction in pending:
-            game = prediction.game
-            if game.home_score is None or game.away_score is None:
+        resolved_prediction_count = 0
+        for prediction in unresolved_predictions:
+            finished_game = prediction.game
+            if finished_game.home_score is None or finished_game.away_score is None:
                 continue
 
-            winner_team_id = None
-            if game.home_score > game.away_score:
-                winner_team_id = game.home_team_id
-            elif game.away_score > game.home_score:
-                winner_team_id = game.away_team_id
+            winning_team_id = None
+            if finished_game.home_score > finished_game.away_score:
+                winning_team_id = finished_game.home_team_id
+            elif finished_game.away_score > finished_game.home_score:
+                winning_team_id = finished_game.away_team_id
 
-            user = db.get(User, prediction.user_id)
-            if prediction.predicted_team_id == winner_team_id:
-                points = points_for_prediction(prediction.probability_at_pick)
+            predictor = db.get(User, prediction.user_id)
+            if prediction.predicted_team_id == winning_team_id:
+                award_points = points_for_prediction(prediction.probability_at_pick)
                 prediction.status = "correct"
-                prediction.points_awarded = points
-                user.bfb_points += points
+                prediction.points_awarded = award_points
+                predictor.bfb_points += award_points
             else:
-                penalty = points_lost_for_prediction(prediction.probability_at_pick)
+                penalty_points = points_lost_for_prediction(prediction.probability_at_pick)
                 prediction.status = "incorrect"
-                prediction.points_awarded = -penalty
-                user.bfb_points = max(0, user.bfb_points - penalty)
+                prediction.points_awarded = -penalty_points
+                predictor.bfb_points = max(0, predictor.bfb_points - penalty_points)
 
             prediction.resolved_at = datetime.now(timezone.utc)
             prediction.seen = False  # hay un resultado nuevo: el frontend debe avisarle al usuario
-            resolved_count += 1
+            resolved_prediction_count += 1
 
         db.commit()
-        logger.info("Predicciones resueltas: %d", resolved_count)
+        logger.info("Predicciones resueltas: %d", resolved_prediction_count)
     finally:
         db.close()
 
@@ -494,26 +494,26 @@ async def sync_news() -> None:
         sports = db.query(Sport).all()
         for sport in sports:
             try:
-                articles = await news_service.fetch_general_news(sport.key, limit=15)
+                fetched_articles = await news_service.fetch_general_news(sport.key, limit=15)
             except Exception:
                 logger.exception("No se pudieron obtener noticias de '%s'.", sport.key)
                 continue
 
-            for article in articles:
-                if not article["article_url"]:
+            for feed_article in fetched_articles:
+                if not feed_article["article_url"]:
                     continue
 
                 existing = (
-                    db.query(NewsArticle).filter(NewsArticle.article_url == article["article_url"]).first()
+                    db.query(NewsArticle).filter(NewsArticle.article_url == feed_article["article_url"]).first()
                 )
                 if existing:
                     # Se actualiza la imagen y el resumen aunque el artículo ya
                     # exista: si el artículo se guardó antes de una mejora en
                     # la extracción de imagen, esto permite que se "autocorrija"
                     # en el siguiente ciclo en vez de quedarse sin imagen para siempre.
-                    existing.image_url = article["image_url"] or existing.image_url
-                    if article["summary"] and article["summary"] != existing.summary:
-                        existing.summary = article["summary"]
+                    existing.image_url = feed_article["image_url"] or existing.image_url
+                    if feed_article["summary"] and feed_article["summary"] != existing.summary:
+                        existing.summary = feed_article["summary"]
                         existing.summary_es = None  # el resumen cambió: se re-traduce abajo
 
                     # Solo se traduce si todavía no hay traducción (evita
@@ -527,14 +527,14 @@ async def sync_news() -> None:
                 db.add(
                     NewsArticle(
                         sport_id=sport.id,
-                        title=article["title"],
-                        title_es=translation_service.translate_to_spanish(article["title"]),
-                        summary=article["summary"],
-                        summary_es=translation_service.translate_to_spanish(article["summary"]),
-                        image_url=article["image_url"],
-                        source=article["source"],
-                        article_url=article["article_url"],
-                        published_at=article["published_at"],
+                        title=feed_article["title"],
+                        title_es=translation_service.translate_to_spanish(feed_article["title"]),
+                        summary=feed_article["summary"],
+                        summary_es=translation_service.translate_to_spanish(feed_article["summary"]),
+                        image_url=feed_article["image_url"],
+                        source=feed_article["source"],
+                        article_url=feed_article["article_url"],
+                        published_at=feed_article["published_at"],
                     )
                 )
             db.commit()

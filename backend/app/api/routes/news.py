@@ -31,13 +31,13 @@ def get_sport_news(
     disponible; si la traducción todavía no se hizo, se usa el original en
     inglés como respaldo (nunca se deja al usuario sin contenido).
     """
-    sport = db.query(Sport).filter(Sport.key == sport_key).first()
-    if not sport:
+    sport_row = db.query(Sport).filter(Sport.key == sport_key).first()
+    if not sport_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deporte no encontrado.")
 
-    articles = (
+    stored_articles = (
         db.query(NewsArticle)
-        .filter(NewsArticle.sport_id == sport.id)
+        .filter(NewsArticle.sport_id == sport_row.id)
         .order_by(NewsArticle.published_at.desc())
         .limit(limit)
         .all()
@@ -45,11 +45,11 @@ def get_sport_news(
 
     # Equipos de todas las ligas de este deporte, para poder detectar
     # menciones en los titulares (ej. "Yankees" -> equipo de la MLB).
-    teams = (
+    league_teams = (
         db.query(Team)
         .join(League, Team.league_id == League.id)
-        .filter(League.sport_id == sport.id)
+        .filter(League.sport_id == sport_row.id)
         .all()
     )
 
-    return annotate_and_rank(articles, teams, sort=sort, lang=lang)
+    return annotate_and_rank(stored_articles, league_teams, sort=sort, lang=lang)

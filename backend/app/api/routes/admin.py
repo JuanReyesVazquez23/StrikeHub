@@ -36,19 +36,19 @@ def list_all_teams(
     if not league:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Liga no encontrada.")
 
-    teams = db.query(Team).filter(Team.league_id == league.id).order_by(Team.name).all()
+    team_rows = db.query(Team).filter(Team.league_id == league.id).order_by(Team.name).all()
     return [
         {
-            "id": t.id,
-            "external_id": t.external_id,
-            "name": t.name,
-            "conference": t.conference,
-            "division": t.division,
-            "is_placeholder": t.is_placeholder,
-            "wins": t.wins,
-            "losses": t.losses,
+            "id": team_row.id,
+            "external_id": team_row.external_id,
+            "name": team_row.name,
+            "conference": team_row.conference,
+            "division": team_row.division,
+            "is_placeholder": team_row.is_placeholder,
+            "wins": team_row.wins,
+            "losses": team_row.losses,
         }
-        for t in teams
+        for team_row in team_rows
     ]
 
 
@@ -96,15 +96,15 @@ def list_excluded_teams(
     if not league:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Liga no encontrada.")
 
-    excluded = (
+    excluded_rows = (
         db.query(ExcludedTeam)
         .filter(ExcludedTeam.league_id == league.id)
         .order_by(ExcludedTeam.excluded_at.desc())
         .all()
     )
     return [
-        {"id": e.id, "external_id": e.external_id, "team_name": e.team_name, "excluded_at": e.excluded_at}
-        for e in excluded
+        {"id": exclusion_row.id, "external_id": exclusion_row.external_id, "team_name": exclusion_row.team_name, "excluded_at": exclusion_row.excluded_at}
+        for exclusion_row in excluded_rows
     ]
 
 
@@ -138,15 +138,15 @@ def list_all_leagues(
     poder borrar una liga completa (ej. un evento ya pasado) y volverla a
     activar más adelante si hace falta.
     """
-    leagues = db.query(League).order_by(League.name).all()
+    stored_leagues = db.query(League).order_by(League.name).all()
     return [
         {
-            "key": lg.key,
-            "name": lg.name,
-            "sync_enabled": lg.sync_enabled,
-            "team_count": db.query(Team).filter(Team.league_id == lg.id).count(),
+            "key": league_row.key,
+            "name": league_row.name,
+            "sync_enabled": league_row.sync_enabled,
+            "team_count": db.query(Team).filter(Team.league_id == league_row.id).count(),
         }
-        for lg in leagues
+        for league_row in stored_leagues
     ]
 
 
@@ -168,7 +168,7 @@ def delete_league(
     if not league:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Liga no encontrada.")
 
-    team_ids = [t.id for t in db.query(Team).filter(Team.league_id == league.id).all()]
+    team_ids = [team_row.id for team_row in db.query(Team).filter(Team.league_id == league.id).all()]
     delete_teams_cascade(db, team_ids)
     league.sync_enabled = False
     db.commit()

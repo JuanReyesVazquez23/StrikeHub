@@ -28,21 +28,21 @@ def list_games(
     # "placeholder" (ej. "American League"/"National League" del Juego de
     # Estrellas de MLB, que no son franquicias reales): mismo criterio que
     # ya se aplica en posiciones y en la búsqueda de estadísticas.
-    HomeTeam = aliased(Team)
-    AwayTeam = aliased(Team)
-    query = (
+    HomeTeamRow = aliased(Team)
+    AwayTeamRow = aliased(Team)
+    games_query = (
         db.query(Game)
         .options(joinedload(Game.home_team), joinedload(Game.away_team))
-        .join(HomeTeam, Game.home_team_id == HomeTeam.id)
-        .join(AwayTeam, Game.away_team_id == AwayTeam.id)
+        .join(HomeTeamRow, Game.home_team_id == HomeTeamRow.id)
+        .join(AwayTeamRow, Game.away_team_id == AwayTeamRow.id)
         .filter(Game.league_id == league.id)
-        .filter(HomeTeam.is_placeholder.is_(False))
-        .filter(AwayTeam.is_placeholder.is_(False))
+        .filter(HomeTeamRow.is_placeholder.is_(False))
+        .filter(AwayTeamRow.is_placeholder.is_(False))
     )
 
     if game_date:
         # Fecha explícita: se respeta el día calendario exacto pedido.
-        query = query.filter(
+        games_query = games_query.filter(
             Game.start_time >= datetime.combine(game_date, datetime.min.time(), tzinfo=timezone.utc)
         ).filter(Game.start_time < datetime.combine(game_date, datetime.max.time(), tzinfo=timezone.utc))
     else:
@@ -53,15 +53,15 @@ def list_games(
         # queda fuera de "hoy" aunque esté sucediendo ahora mismo), y la
         # ventana de 7 días permite ver "próximos" para predecir (la sync de
         # NBA guarda ayer -> +7 días a propósito).
-        now = datetime.now(timezone.utc)
-        query = query.filter(Game.start_time >= now - timedelta(hours=24)).filter(
-            Game.start_time <= now + timedelta(days=7)
+        current_time = datetime.now(timezone.utc)
+        games_query = games_query.filter(Game.start_time >= current_time - timedelta(hours=24)).filter(
+            Game.start_time <= current_time + timedelta(days=7)
         )
 
     if status_filter:
-        query = query.filter(Game.status == status_filter)
+        games_query = games_query.filter(Game.status == status_filter)
 
-    return query.order_by(Game.start_time.asc()).limit(limit).all()
+    return games_query.order_by(Game.start_time.asc()).limit(limit).all()
 
 
 @router.get("/games/{game_id}", response_model=GameDetailOut)
@@ -71,21 +71,21 @@ def get_game_detail(game_id: int = Path(gt=0, le=2147483647), db: Session = Depe
     específica del deporte, por ejemplo en béisbol: pitcher ganador,
     perdedor, salvamento y líderes ofensivos del juego.
     """
-    HomeTeam = aliased(Team)
-    AwayTeam = aliased(Team)
-    game = (
+    HomeTeamRow = aliased(Team)
+    AwayTeamRow = aliased(Team)
+    target_game = (
         db.query(Game)
         .options(joinedload(Game.home_team), joinedload(Game.away_team))
-        .join(HomeTeam, Game.home_team_id == HomeTeam.id)
-        .join(AwayTeam, Game.away_team_id == AwayTeam.id)
+        .join(HomeTeamRow, Game.home_team_id == HomeTeamRow.id)
+        .join(AwayTeamRow, Game.away_team_id == AwayTeamRow.id)
         .filter(Game.id == game_id)
-        .filter(HomeTeam.is_placeholder.is_(False))
-        .filter(AwayTeam.is_placeholder.is_(False))
+        .filter(HomeTeamRow.is_placeholder.is_(False))
+        .filter(AwayTeamRow.is_placeholder.is_(False))
         .first()
     )
-    if not game:
+    if not target_game:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Partido no encontrado.")
-    return game
+    return target_game
 
 
 @router.get("/games/{game_id}/live")
@@ -107,34 +107,34 @@ async def get_game_live_situation(
     momento (cambia en cada jugada, así que no tiene sentido guardarla
     traducida). Nombres de jugadores nunca se traducen.
     """
-    game = db.query(Game).options(joinedload(Game.league)).filter(Game.id == game_id).first()
-    if not game:
+    target_game = db.query(Game).options(joinedload(Game.league)).filter(Game.id == game_id).first()
+    if not target_game:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Partido no encontrado.")
 
-    if game.league.data_provider != "mlb_stats_api":
+    if target_game.league.data_provider != "mlb_stats_api":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="El detalle en vivo solo está disponible para partidos de MLB por ahora.",
         )
 
-    if game.status != "live":
-        return {"status": game.status, "situation": None}
+    if target_game.status != "live":
+        return {"status": target_game.status, "situation": None}
 
     # Endpoint costoso (1 llamada externa a MLB por request + traducción):
     # rate-limit para que un sondeo agresivo no tumbe la cuota ni el servidor.
     enforce_rate_limit(request, bucket="games_live", limit=30, window_seconds=60)
 
     try:
-        live_feed = await mlb_service.get_live_feed(int(game.external_id))
+        live_feed = await mlb_service.get_live_feed(int(target_game.external_id))
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail="No se pudo obtener el estado en vivo del partido."
         )
 
-    situation = mlb_service.extract_live_situation(live_feed)
-    if lang == "es" and situation.get("last_play"):
-        situation["last_play"] = translation_service.translate_to_spanish(situation["last_play"]) or situation[
+    situation_payload = mlb_service.extract_live_situation(live_feed)
+    if lang == "es" and situation_payload.get("last_play"):
+        situation_payload["last_play"] = translation_service.translate_to_spanish(situation_payload["last_play"]) or situation_payload[
             "last_play"
         ]
 
-    return {"status": game.status, "situation": situation}
+    return {"status": target_game.status, "situation": situation_payload}

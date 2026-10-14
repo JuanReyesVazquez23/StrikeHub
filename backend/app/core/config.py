@@ -5,7 +5,6 @@ Todas las variables sensibles (contraseñas, claves de API, secretos JWT)
 se leen desde el entorno (.env) y NUNCA se escriben directamente en el código.
 """
 from functools import lru_cache
-from typing import List
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,16 +22,16 @@ class Settings(BaseSettings):
 
     @field_validator("DATABASE_URL")
     @classmethod
-    def _normalize_database_url(cls, v: str) -> str:
+    def _normalize_database_url(cls, database_url: str) -> str:
         """
         Algunas plataformas (Railway, Heroku) entregan la URL de Postgres con
         el prefijo antiguo 'postgres://', que SQLAlchemy 2.0 ya no acepta.
         Se normaliza automáticamente a 'postgresql://' para evitar un error
         de arranque difícil de diagnosticar.
         """
-        if v.startswith("postgres://"):
-            return v.replace("postgres://", "postgresql://", 1)
-        return v
+        if database_url.startswith("postgres://"):
+            return database_url.replace("postgres://", "postgresql://", 1)
+        return database_url
 
     # --- Seguridad / JWT ---
     # SECRET_KEY debe generarse único por instalación. Nunca usar el valor por defecto en producción.
@@ -43,7 +42,7 @@ class Settings(BaseSettings):
 
     # --- CORS ---
     # Lista de orígenes permitidos. En producción NUNCA usar "*".
-    CORS_ORIGINS: List[str] = [
+    CORS_ORIGINS: list[str] = [
         "http://localhost:5500",
         "http://127.0.0.1:5500",
         "http://localhost:8000",
@@ -76,8 +75,8 @@ class Settings(BaseSettings):
     ADMIN_USERNAMES: str = ""
 
     def is_admin_username(self, username: str) -> bool:
-        admins = {u.strip() for u in self.ADMIN_USERNAMES.split(",") if u.strip()}
-        return username in admins
+        configured_admins = {candidate.strip() for candidate in self.ADMIN_USERNAMES.split(",") if candidate.strip()}
+        return username in configured_admins
 
     @model_validator(mode="after")
     def _fail_fast_insecure_production(self):
@@ -94,11 +93,11 @@ class Settings(BaseSettings):
                 or len(self.SECRET_KEY) < 32
             ):
                 raise ValueError("SECRET_KEY inválida en producción: define una clave aleatoria de 32+ caracteres.")
-            for origin in self.CORS_ORIGINS:
-                if origin.strip() in ("*", "null"):
+            for allowed_origin in self.CORS_ORIGINS:
+                if allowed_origin.strip() in ("*", "null"):
                     raise ValueError("CORS_ORIGINS no puede ser '*' en producción cuando se usan cookies.")
-                if "localhost" in origin or "127.0.0.1" in origin:
-                    raise ValueError(f"CORS_ORIGINS contiene origen local en producción: {origin}")
+                if "localhost" in allowed_origin or "127.0.0.1" in allowed_origin:
+                    raise ValueError(f"CORS_ORIGINS contiene origen local en producción: {allowed_origin}")
         return self
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")

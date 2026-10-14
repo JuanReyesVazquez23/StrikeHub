@@ -1,5 +1,4 @@
-"""
-Seguridad: hashing de contraseñas (bcrypt) y tokens de sesión (JWT).
+"""Seguridad: hashing de contraseñas (bcrypt) y tokens de sesión (JWT).
 
 Decisiones de seguridad tomadas aquí:
 - Contraseñas: nunca se guardan en texto plano, se usa bcrypt (passlib).
@@ -16,7 +15,7 @@ from passlib.context import CryptContext
 
 from app.core.config import settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+password_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def hash_password(plain_password: str) -> str:
@@ -25,7 +24,7 @@ def hash_password(plain_password: str) -> str:
         # pero se deja como red de seguridad: mejor un error claro que el
         # ValueError interno de bcrypt.
         raise ValueError("La contraseña no puede tener más de 72 caracteres.")
-    return pwd_context.hash(plain_password)
+    return password_context.hash(plain_password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -34,22 +33,22 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         # de larga (ver hash_password), así que nunca puede ser correcta.
         # Se devuelve False en vez de dejar que bcrypt truene con un 500.
         return False
-    return pwd_context.verify(plain_password, hashed_password)
+    return password_context.verify(plain_password, hashed_password)
 
 
-def create_access_token(subject: str, expires_minutes: Optional[int] = None) -> str:
+def create_access_token(user_id: str, expires_minutes: Optional[int] = None) -> str:
     """Crea un JWT cuyo 'sub' es el identificador del usuario (string)."""
-    expire_minutes = expires_minutes or settings.ACCESS_TOKEN_EXPIRE_MINUTES
-    expire = datetime.now(timezone.utc) + timedelta(minutes=expire_minutes)
-    payload = {"sub": subject, "exp": expire, "iat": datetime.now(timezone.utc)}
-    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    lifetime_minutes = expires_minutes or settings.ACCESS_TOKEN_EXPIRE_MINUTES
+    expiration_time = datetime.now(timezone.utc) + timedelta(minutes=lifetime_minutes)
+    token_claims = {"sub": user_id, "exp": expiration_time, "iat": datetime.now(timezone.utc)}
+    return jwt.encode(token_claims, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
 def decode_access_token(token: str) -> Optional[str]:
     """Devuelve el 'sub' (id de usuario) si el token es válido, o None si no lo es."""
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
-        sub = payload.get("sub")
-        return str(sub) if sub is not None else None
+        token_claims = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        subject_claim = token_claims.get("sub")
+        return str(subject_claim) if subject_claim is not None else None
     except jwt.PyJWTError:
         return None

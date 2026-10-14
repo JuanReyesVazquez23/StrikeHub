@@ -15,38 +15,38 @@ from app.services.probability_service import points_for_prediction, points_lost_
 router = APIRouter(prefix="/predictions", tags=["predictions"])
 
 
-def _team_summary(team) -> dict | None:
-    if not team:
+def _summarize_team(team_row) -> dict | None:
+    if not team_row:
         return None
-    return {"id": team.id, "name": team.name, "logo_url": team.logo_url}
+    return {"id": team_row.id, "name": team_row.name, "logo_url": team_row.logo_url}
 
 
-def _serialize_prediction(prediction: Prediction) -> dict:
+def _serialize_prediction(stored_prediction: Prediction) -> dict:
     """
     Historial de predicciones con datos ya listos para mostrar (nombres y
     logos de equipos, marcador), para que el frontend no tenga que hacer
     una petición aparte por cada partido.
     """
-    game = prediction.game
+    scheduled_game = stored_prediction.game
     return {
-        "id": prediction.id,
-        "status": prediction.status,  # pending | correct | incorrect
-        "points_awarded": prediction.points_awarded,
-        "probability_at_pick": round(prediction.probability_at_pick, 3),
-        "seen": prediction.seen,
-        "created_at": prediction.created_at,
-        "resolved_at": prediction.resolved_at,
-        "predicted_team": _team_summary(prediction.predicted_team),
+        "id": stored_prediction.id,
+        "status": stored_prediction.status,  # pending | correct | incorrect
+        "points_awarded": stored_prediction.points_awarded,
+        "probability_at_pick": round(stored_prediction.probability_at_pick, 3),
+        "seen": stored_prediction.seen,
+        "created_at": stored_prediction.created_at,
+        "resolved_at": stored_prediction.resolved_at,
+        "predicted_team": _summarize_team(stored_prediction.predicted_team),
         "game": {
-            "id": game.id,
-            "start_time": game.start_time,
-            "status": game.status,
-            "home_score": game.home_score,
-            "away_score": game.away_score,
-            "home_team": _team_summary(game.home_team),
-            "away_team": _team_summary(game.away_team),
+            "id": scheduled_game.id,
+            "start_time": scheduled_game.start_time,
+            "status": scheduled_game.status,
+            "home_score": scheduled_game.home_score,
+            "away_score": scheduled_game.away_score,
+            "home_team": _summarize_team(scheduled_game.home_team),
+            "away_team": _summarize_team(scheduled_game.away_team),
         }
-        if game
+        if scheduled_game
         else None,
     }
 
@@ -54,7 +54,7 @@ def _serialize_prediction(prediction: Prediction) -> dict:
 @router.get("/me")
 def list_my_predictions(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Historial de predicciones del usuario, más recientes primero (máx. 100)."""
-    predictions = (
+    stored_predictions = (
         db.query(Prediction)
         .options(
             joinedload(Prediction.game).joinedload(Game.home_team),
@@ -66,7 +66,7 @@ def list_my_predictions(current_user: User = Depends(get_current_user), db: Sess
         .limit(100)
         .all()
     )
-    return [_serialize_prediction(p) for p in predictions]
+    return [_serialize_prediction(stored_prediction) for stored_prediction in stored_predictions]
 
 
 class MarkSeenPayload(BaseModel):
@@ -144,10 +144,10 @@ def create_prediction(
 
     # Normaliza a aware: algún driver/DB puede devolver naive y la
     # comparación ingenua contra now(utc) rompería con TypeError (500).
-    start_time = game.start_time
-    if start_time.tzinfo is None:
-        start_time = start_time.replace(tzinfo=timezone.utc)
-    if start_time <= datetime.now(timezone.utc):
+    scheduled_start = game.start_time
+    if scheduled_start.tzinfo is None:
+        scheduled_start = scheduled_start.replace(tzinfo=timezone.utc)
+    if scheduled_start <= datetime.now(timezone.utc):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El partido ya va a comenzar.")
 
     if payload.predicted_team_id not in (game.home_team_id, game.away_team_id):
@@ -157,17 +157,17 @@ def create_prediction(
         )
 
     if game.home_win_probability is None:
-        probability_of_chosen_team = 0.5
+        chosen_team_probability = 0.5
     elif payload.predicted_team_id == game.home_team_id:
-        probability_of_chosen_team = game.home_win_probability
+        chosen_team_probability = game.home_win_probability
     else:
-        probability_of_chosen_team = 1 - game.home_win_probability
+        chosen_team_probability = 1 - game.home_win_probability
 
     prediction = Prediction(
         user_id=current_user.id,
         game_id=game.id,
         predicted_team_id=payload.predicted_team_id,
-        probability_at_pick=probability_of_chosen_team,
+        probability_at_pick=chosen_team_probability,
     )
     db.add(prediction)
     try:
@@ -186,16 +186,16 @@ def preview_potential_points(
     db: Session = Depends(get_db),
 ):
     """Permite mostrar en el frontend cuántos puntos se ganarían ANTES de confirmar la predicción."""
-    game = db.get(Game, game_id)
-    if not game:
+    target_game = db.get(Game, game_id)
+    if not target_game:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Partido no encontrado.")
-    if team_id not in (game.home_team_id, game.away_team_id):
+    if team_id not in (target_game.home_team_id, target_game.away_team_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Equipo no participa en este partido.")
 
-    probability = game.home_win_probability if game.home_win_probability is not None else 0.5
-    prob_of_team = probability if team_id == game.home_team_id else 1 - probability
+    home_probability = target_game.home_win_probability if target_game.home_win_probability is not None else 0.5
+    selected_team_probability = home_probability if team_id == target_game.home_team_id else 1 - home_probability
     return {
-        "probability": round(prob_of_team, 3),
-        "potential_points": points_for_prediction(prob_of_team),
-        "potential_loss": points_lost_for_prediction(prob_of_team),
+        "probability": round(selected_team_probability, 3),
+        "potential_points": points_for_prediction(selected_team_probability),
+        "potential_loss": points_lost_for_prediction(selected_team_probability),
     }

@@ -63,21 +63,21 @@ def get_standings(league_key: str = Path(pattern=r"^[a-z0-9_]{1,40}$"), db: Sess
         .all()
     )
 
-    groups: dict[str, list[Team]] = {}
-    for team in teams:
-        group_key = team.division or team.conference or league.name
-        groups.setdefault(group_key, []).append(team)
+    standings_groups: dict[str, list[Team]] = {}
+    for team_row in teams:
+        group_label = team_row.division or team_row.conference or league.name
+        standings_groups.setdefault(group_label, []).append(team_row)
 
     result = []
-    for group_name, group_teams in groups.items():
-        leader_wins = group_teams[0].wins
-        leader_losses = group_teams[0].losses
-        group_out = []
-        for team in group_teams:
-            games_back = ((leader_wins - team.wins) + (team.losses - leader_losses)) / 2
-            team_dict = TeamOut.model_validate(team).model_dump()
-            team_dict["games_back"] = round(max(games_back, 0.0), 1)
-            group_out.append(team_dict)
-        result.append({"group_name": group_name, "teams": group_out})
+    for group_name, grouped_teams in standings_groups.items():
+        group_leader_wins = grouped_teams[0].wins
+        group_leader_losses = grouped_teams[0].losses
+        group_entries = []
+        for team_row in grouped_teams:
+            games_behind = ((group_leader_wins - team_row.wins) + (team_row.losses - group_leader_losses)) / 2
+            team_payload = TeamOut.model_validate(team_row).model_dump()
+            team_payload["games_back"] = round(max(games_behind, 0.0), 1)
+            group_entries.append(team_payload)
+        result.append({"group_name": group_name, "teams": group_entries})
 
     return result

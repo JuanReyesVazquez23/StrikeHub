@@ -28,7 +28,7 @@ BACKGROUND_SYNC_INTERVAL_SECONDS = 300  # 5 minutos
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 
-async def _background_sync_loop() -> None:
+async def _run_periodic_sync_loop() -> None:
     """Refresca los datos de MLB periódicamente."""
     while True:
         try:
@@ -38,9 +38,9 @@ async def _background_sync_loop() -> None:
         await asyncio.sleep(BACKGROUND_SYNC_INTERVAL_SECONDS)
 
 
-def _run_background_sync_loop_in_thread() -> None:
+def _start_sync_loop_in_background_thread() -> None:
     """
-    Corre _background_sync_loop en su PROPIO hilo, con su PROPIO event loop,
+    Corre _run_periodic_sync_loop en su PROPIO hilo, con su PROPIO event loop,
     separado del event loop principal que atiende las peticiones HTTP.
 
     Por qué: sync_service.py usa sesiones SÍNCRONAS de SQLAlchemy (no la
@@ -54,11 +54,11 @@ def _run_background_sync_loop_in_thread() -> None:
     hilo aparte, el servidor sigue respondiendo con normalidad sin importar
     cuánto tarde la sincronización.
     """
-    asyncio.run(_background_sync_loop())
+    asyncio.run(_run_periodic_sync_loop())
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(application: FastAPI):
     # NOTA: create_all() es adecuado para desarrollo. En producción se
     # recomienda usar Alembic para migraciones versionadas del esquema.
     Base.metadata.create_all(bind=engine)
@@ -67,15 +67,15 @@ async def lifespan(app: FastAPI):
     # (ver core/migrations.py para el porqué). Seguro de correr siempre.
     run_lightweight_migrations(engine)
 
-    db = SessionLocal()
+    database_session = SessionLocal()
     try:
-        ensure_base_catalog(db)
+        ensure_base_catalog(database_session)
     finally:
-        db.close()
+        database_session.close()
 
     # daemon=True: el hilo se cierra solo cuando el proceso termina, no hace
     # falta (ni conviene) intentar cancelarlo a mano en el shutdown.
-    threading.Thread(target=_run_background_sync_loop_in_thread, daemon=True).start()
+    threading.Thread(target=_start_sync_loop_in_background_thread, daemon=True).start()
     yield
 
 
@@ -98,7 +98,7 @@ async def security_headers(request: Request, call_next):
     puntos), imágenes https:/data: (logos ESPN/MLB remotos) y Google Fonts.
     """
     response = await call_next(request)
-    csp = (
+    security_policy = (
         "default-src 'self'; "
         "base-uri 'self'; "
         "frame-ancestors 'none'; "
@@ -110,7 +110,7 @@ async def security_headers(request: Request, call_next):
         "connect-src 'self'; "
         "form-action 'self'"
     )
-    response.headers["Content-Security-Policy"] = csp
+    response.headers["Content-Security-Policy"] = security_policy
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"

@@ -14,7 +14,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _set_session_cookie(response: Response, user_id: int) -> None:
-    token = create_access_token(subject=str(user_id))
+    token = create_access_token(user_id=str(user_id))
     response.set_cookie(
         key=settings.COOKIE_NAME,
         value=token,
@@ -30,22 +30,22 @@ def _set_session_cookie(response: Response, user_id: int) -> None:
 def register(payload: UserCreate, request: Request, response: Response, db: Session = Depends(get_db)):
     enforce_rate_limit(request, bucket="register")
 
-    existing = (
+    duplicate_account = (
         db.query(User)
         .filter(or_(User.username == payload.username, User.email == payload.email))
         .first()
     )
-    if existing:
+    if duplicate_account:
         # Mensaje genérico: no revelamos si fue el usuario o el correo el que ya existe.
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Usuario o correo ya registrado.")
 
-    user = User(
+    new_account = User(
         username=payload.username,
         email=payload.email,
         hashed_password=hash_password(payload.password),
         bfb_points=settings.NEW_USER_STARTING_POINTS,
     )
-    db.add(user)
+    db.add(new_account)
     try:
         db.commit()
     except IntegrityError:
@@ -53,18 +53,18 @@ def register(payload: UserCreate, request: Request, response: Response, db: Sess
         # entre el check de arriba y el commit. Mensaje genérico igual.
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Usuario o correo ya registrado.")
-    db.refresh(user)
+    db.refresh(new_account)
 
-    _set_session_cookie(response, user.id)
-    user.is_admin = settings.is_admin_username(user.username)
-    return user
+    _set_session_cookie(response, new_account.id)
+    new_account.is_admin = settings.is_admin_username(new_account.username)
+    return new_account
 
 
 @router.post("/login", response_model=UserOut)
 def login(payload: UserLogin, request: Request, response: Response, db: Session = Depends(get_db)):
     enforce_rate_limit(request, bucket="login")
 
-    user = db.query(User).filter(User.username == payload.username).first()
+    stored_account = db.query(User).filter(User.username == payload.username).first()
 
     # Mensaje idéntico tanto si el usuario no existe como si la contraseña es incorrecta,
     # para no permitir enumerar usuarios válidos.
@@ -72,15 +72,15 @@ def login(payload: UserLogin, request: Request, response: Response, db: Session 
         status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario o contraseña incorrectos."
     )
 
-    if not user or not verify_password(payload.password, user.hashed_password):
+    if not stored_account or not verify_password(payload.password, stored_account.hashed_password):
         raise invalid_credentials
 
-    if not user.is_active:
+    if not stored_account.is_active:
         raise invalid_credentials
 
-    _set_session_cookie(response, user.id)
-    user.is_admin = settings.is_admin_username(user.username)
-    return user
+    _set_session_cookie(response, stored_account.id)
+    stored_account.is_admin = settings.is_admin_username(stored_account.username)
+    return stored_account
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)

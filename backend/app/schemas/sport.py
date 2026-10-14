@@ -1,19 +1,20 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class SportOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     key: str
     name_es: str
     name_en: str
 
-    class Config:
-        from_attributes = True
-
 
 class LeagueOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     key: str
     name: str
@@ -21,11 +22,10 @@ class LeagueOut(BaseModel):
     logo_url: str | None
     is_primary: bool
 
-    class Config:
-        from_attributes = True
-
 
 class TeamOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     abbreviation: str | None
@@ -37,9 +37,6 @@ class TeamOut(BaseModel):
     win_pct: float
     division: str | None
     conference: str | None
-
-    class Config:
-        from_attributes = True
 
 
 class StandingsTeamOut(TeamOut):
@@ -56,6 +53,8 @@ class StandingsGroupOut(BaseModel):
 
 
 class PlayerOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     full_name: str
     position: str | None
@@ -63,11 +62,10 @@ class PlayerOut(BaseModel):
     photo_url: str | None
     team_id: int
 
-    class Config:
-        from_attributes = True
-
 
 class GameOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     external_id: str
     start_time: datetime
@@ -80,20 +78,16 @@ class GameOut(BaseModel):
     venue: str | None
     period_status: str | None
 
-    class Config:
-        from_attributes = True
-
 
 class GameDetailOut(GameOut):
     """Incluye el detalle específico del deporte (pitcher ganador, boxscore, goleadores...)."""
 
     details: dict | None
 
-    class Config:
-        from_attributes = True
-
 
 class NewsOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     title: str
     summary: str | None
@@ -105,6 +99,3 @@ class NewsOut(BaseModel):
     # titular menciona un equipo conocido, se incluye su nombre y logo.
     team_name: str | None = None
     team_logo_url: str | None = None
-
-    class Config:
-        from_attributes = True

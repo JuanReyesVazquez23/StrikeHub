@@ -17,27 +17,27 @@ def get_current_user(
     Obtiene el usuario autenticado a partir de la cookie httpOnly de sesión.
     Lanza 401 si no hay sesión válida.
     """
-    credentials_error = HTTPException(
+    authentication_error = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="No autenticado. Inicia sesión para continuar.",
     )
     if not bfb_session:
-        raise credentials_error
+        raise authentication_error
 
-    user_id = decode_access_token(bfb_session)
-    if user_id is None:
-        raise credentials_error
+    decoded_user_id = decode_access_token(bfb_session)
+    if decoded_user_id is None:
+        raise authentication_error
 
     try:
-        user_pk = int(user_id)
+        user_primary_key = int(decoded_user_id)
     except (TypeError, ValueError):
-        raise credentials_error
+        raise authentication_error
 
-    user = db.get(User, user_pk)
-    if user is None or not user.is_active:
-        raise credentials_error
+    authenticated_user = db.get(User, user_primary_key)
+    if authenticated_user is None or not authenticated_user.is_active:
+        raise authentication_error
 
-    return user
+    return authenticated_user
 
 
 def get_current_user_optional(
@@ -47,23 +47,23 @@ def get_current_user_optional(
     """Igual que get_current_user pero devuelve None en vez de lanzar error (para endpoints públicos)."""
     if not bfb_session:
         return None
-    user_id = decode_access_token(bfb_session)
-    if user_id is None:
+    decoded_user_id = decode_access_token(bfb_session)
+    if decoded_user_id is None:
         return None
     try:
-        user_pk = int(user_id)
+        user_primary_key = int(decoded_user_id)
     except (TypeError, ValueError):
         return None
-    return db.get(User, user_pk)
+    return db.get(User, user_primary_key)
 
 
-def get_current_admin_user(current_user: User = Depends(get_current_user)) -> User:
+def get_current_admin_user(authenticated_user: User = Depends(get_current_user)) -> User:
     """
     Igual que get_current_user, pero además exige que el usuario esté en
     ADMIN_USERNAMES (ver core/config.py). Se usa solo para el panel de
     administración (borrar equipos incorrectos manualmente) — nunca para
     rutas de uso normal de la app.
     """
-    if not settings.is_admin_username(current_user.username):
+    if not settings.is_admin_username(authenticated_user.username):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado.")
-    return current_user
+    return authenticated_user

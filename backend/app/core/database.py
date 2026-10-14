@@ -22,8 +22,8 @@ Base = declarative_base()
 
 def get_db():
     """Dependencia de FastAPI: entrega una sesión de BD y garantiza su cierre."""
-    db = SessionLocal()
+    database_session = SessionLocal()
     try:
-        yield db
+        yield database_session
     finally:
-        db.close()
+        database_session.close()

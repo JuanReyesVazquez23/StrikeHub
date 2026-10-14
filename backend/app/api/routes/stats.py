@@ -26,9 +26,9 @@ _leaders_cache: dict = {"expires_at": 0.0, "payload": None}
 LEADERS_TTL_SECONDS = 1800  # 30 min: en offseason casi no cambian
 
 
-def _escape_like(value: str) -> str:
+def _escape_like_search_term(search_term: str) -> str:
     """Escapa %, _ y \\ para que el buscador no permita patrones LIKE arbitrarios."""
-    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return search_term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 @router.get("/search")
@@ -53,9 +53,9 @@ def search_entities(
 
     enforce_rate_limit(request, bucket="stats_search", limit=30, window_seconds=60)
 
-    like_pattern = f"%{_escape_like(q.strip())}%"
+    like_pattern = f"%{_escape_like_search_term(q.strip())}%"
     if entity_type == "player":
-        matches = (
+        matching_players = (
             db.query(Player)
             .join(Team, Player.team_id == Team.id)
             .join(League, Team.league_id == League.id)
@@ -66,15 +66,15 @@ def search_entities(
         )
         return [
             {
-                "id": p.id,
+                "id": player_row.id,
                 "type": "player",
-                "label": p.full_name,
-                "sublabel": f"{p.position or ''} · {p.team.name if p.team else ''}".strip(" ·"),
+                "label": player_row.full_name,
+                "sublabel": f"{player_row.position or ''} · {player_row.team.name if player_row.team else ''}".strip(" ·"),
             }
-            for p in matches
+            for player_row in matching_players
         ]
 
-    matches = (
+    matching_teams = (
         db.query(Team)
         .join(League, Team.league_id == League.id)
         .filter(Team.name.ilike(like_pattern, escape="\\"), Team.is_placeholder.is_(False), League.sport_id == sport.id)
@@ -83,13 +83,13 @@ def search_entities(
     )
     return [
         {
-            "id": t.id,
+            "id": team_row.id,
             "type": "team",
-            "label": t.name,
-            "sublabel": t.division or t.city or "",
-            "logo_url": t.logo_url,
+            "label": team_row.name,
+            "sublabel": team_row.division or team_row.city or "",
+            "logo_url": team_row.logo_url,
         }
-        for t in matches
+        for team_row in matching_teams
     ]
 
 
@@ -104,46 +104,46 @@ async def season_leaders(
     """
     enforce_rate_limit(request, bucket="stats_leaders", limit=10, window_seconds=60)
 
-    year = season or datetime.now(timezone.utc).year
-    now = time.monotonic()
-    if _leaders_cache["payload"] is not None and _leaders_cache["expires_at"] > now:
-        cached = _leaders_cache["payload"]
-        if cached.get("season") == year:
-            return cached
+    season_year = season or datetime.now(timezone.utc).year
+    clock_now = time.monotonic()
+    if _leaders_cache["payload"] is not None and _leaders_cache["expires_at"] > clock_now:
+        cached_payload = _leaders_cache["payload"]
+        if cached_payload.get("season") == season_year:
+            return cached_payload
 
-    groups: dict[str, dict] = {}
+    leader_groups: dict[str, dict] = {}
     try:
         # En paralelo: 7 llamadas secuenciales tardaban ~9s.
-        pairs = [(group, category) for group, categories in LEADER_CATEGORIES.items() for category in categories]
-        raws = await asyncio.gather(
-            *[mlb_service.get_stat_leaders(year, category, limit=5) for _, category in pairs]
+        category_pairs = [(group, category) for group, categories in LEADER_CATEGORIES.items() for category in categories]
+        raw_responses = await asyncio.gather(
+            *[mlb_service.get_stat_leaders(season_year, category, limit=5) for _, category in category_pairs]
         )
-        for (group, category), raw in zip(pairs, raws):
-            leaders = (raw.get("leagueLeaders") or [{}])[0].get("leaders", [])
-            groups.setdefault(group, {})[category] = [
+        for (group, category), raw_response in zip(category_pairs, raw_responses):
+            leader_entries = (raw_response.get("leagueLeaders") or [{}])[0].get("leaders", [])
+            leader_groups.setdefault(group, {})[category] = [
                 {
-                    "rank": entry.get("rank"),
-                    "name": (entry.get("person") or {}).get("fullName", ""),
-                    "team": (entry.get("team") or {}).get("name", ""),
-                    "team_id": (entry.get("team") or {}).get("id"),
-                    "value": entry.get("value"),
+                    "rank": leader_entry.get("rank"),
+                    "name": (leader_entry.get("person") or {}).get("fullName", ""),
+                    "team": (leader_entry.get("team") or {}).get("name", ""),
+                    "team_id": (leader_entry.get("team") or {}).get("id"),
+                    "value": leader_entry.get("value"),
                 }
-                for entry in leaders
+                for leader_entry in leader_entries
             ]
     except Exception:
-        logger.exception("No se pudieron obtener los líderes %d.", year)
+        logger.exception("No se pudieron obtener los líderes %d.", season_year)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="No se pudieron obtener los líderes de la temporada.",
         )
 
-    payload = {"season": year, "groups": groups}
+    payload = {"season": season_year, "groups": leader_groups}
     _leaders_cache["payload"] = payload
-    _leaders_cache["expires_at"] = now + LEADERS_TTL_SECONDS
+    _leaders_cache["expires_at"] = clock_now + LEADERS_TTL_SECONDS
     return payload
 
 
-def _build_team_profile(team_id: int, db: Session) -> dict:
+def _load_team_profile(team_id: int, db: Session) -> dict:
     """
     Construye el perfil completo de un equipo (récord, posición y sus
     últimos partidos). Función compartida entre el endpoint de un solo
@@ -153,7 +153,7 @@ def _build_team_profile(team_id: int, db: Session) -> dict:
     if not team:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Equipo no encontrado.")
 
-    recent_games = (
+    recent_finished_games = (
         db.query(Game)
         .options(joinedload(Game.home_team), joinedload(Game.away_team))
         .filter(Game.status == "final")
@@ -163,17 +163,17 @@ def _build_team_profile(team_id: int, db: Session) -> dict:
         .all()
     )
 
-    def _result_line(game) -> dict:
-        is_home = game.home_team_id == team.id
-        team_score = game.home_score if is_home else game.away_score
-        rival = game.away_team if is_home else game.home_team
-        rival_score = game.away_score if is_home else game.home_score
-        outcome = "W" if (team_score or 0) > (rival_score or 0) else "L"
+    def _format_result_line(finished_game) -> dict:
+        is_home_game = finished_game.home_team_id == team.id
+        team_runs = finished_game.home_score if is_home_game else finished_game.away_score
+        opponent = finished_game.away_team if is_home_game else finished_game.home_team
+        opponent_runs = finished_game.away_score if is_home_game else finished_game.home_score
+        result_code = "W" if (team_runs or 0) > (opponent_runs or 0) else "L"
         return {
-            "date": game.start_time.date().isoformat(),
-            "rival": rival.name,
-            "score": f"{team_score}-{rival_score}",
-            "outcome": outcome,
+            "date": finished_game.start_time.date().isoformat(),
+            "rival": opponent.name,
+            "score": f"{team_runs}-{opponent_runs}",
+            "outcome": result_code,
         }
 
     return {
@@ -186,14 +186,14 @@ def _build_team_profile(team_id: int, db: Session) -> dict:
         "record": {"wins": team.wins, "losses": team.losses, "ties": team.ties, "win_pct": team.win_pct},
         "division": team.division,
         "conference": team.conference,
-        "recent_results": [_result_line(g) for g in recent_games],
+        "recent_results": [_format_result_line(finished_game) for finished_game in recent_finished_games],
     }
 
 
 @router.get("/team/{team_id}")
 def team_stats(team_id: int = Path(gt=0, le=2147483647), db: Session = Depends(get_db)):
     """Perfil real de un equipo: récord, posición y sus últimos partidos jugados."""
-    profile = _build_team_profile(team_id, db)
+    profile = _load_team_profile(team_id, db)
     profile.pop("sport_id", None)  # detalle interno, no se expone en el perfil individual
     return profile
 
@@ -214,8 +214,8 @@ def compare_teams(
     if id_a == id_b:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Elige dos equipos distintos.")
 
-    team_a = _build_team_profile(id_a, db)
-    team_b = _build_team_profile(id_b, db)
+    team_a = _load_team_profile(id_a, db)
+    team_b = _load_team_profile(id_b, db)
 
     if team_a["sport_id"] is None or team_b["sport_id"] is None:
         raise HTTPException(
@@ -233,7 +233,7 @@ def compare_teams(
     return {"team_a": team_a, "team_b": team_b}
 
 
-async def _build_player_profile(player_id: int, db: Session) -> dict:
+async def _load_player_profile(player_id: int, db: Session) -> dict:
     """
     Construye el perfil completo de un jugador (posición, equipo, y
     estadísticas reales si es de MLB). Función compartida entre el
@@ -249,16 +249,16 @@ async def _build_player_profile(player_id: int, db: Session) -> dict:
     if not player:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Jugador no encontrado.")
 
-    batting_stats = None
-    pitching_stats = None
+    batting_line = None
+    pitching_line = None
 
-    is_mlb_player = player.team and player.team.league and player.team.league.data_provider == "mlb_stats_api"
-    if is_mlb_player:
+    is_mlb_rostered = player.team and player.team.league and player.team.league.data_provider == "mlb_stats_api"
+    if is_mlb_rostered:
         try:
-            current_season = datetime.now(timezone.utc).year
-            raw_stats = await mlb_service.get_player_season_stats(int(player.external_id), current_season)
-            batting_stats = mlb_service.extract_batting_stats(raw_stats["hitting"])
-            pitching_stats = mlb_service.extract_pitching_stats(raw_stats["pitching"])
+            current_season_year = datetime.now(timezone.utc).year
+            season_stats_response = await mlb_service.get_player_season_stats(int(player.external_id), current_season_year)
+            batting_line = mlb_service.extract_batting_stats(season_stats_response["hitting"])
+            pitching_line = mlb_service.extract_pitching_stats(season_stats_response["pitching"])
         except Exception:
             pass  # el perfil se muestra igual, solo sin números, en vez de fallar la petición completa
 
@@ -275,8 +275,8 @@ async def _build_player_profile(player_id: int, db: Session) -> dict:
         if player.team
         else None,
         "sport_id": player.team.league.sport_id if player.team and player.team.league else None,
-        "batting_stats": batting_stats,
-        "pitching_stats": pitching_stats,
+        "batting_stats": batting_line,
+        "pitching_stats": pitching_line,
     }
 
 
@@ -298,7 +298,7 @@ async def player_stats(
     """
     # 1 llamada externa por request (MLB/NBA/API-Football): rate-limit.
     enforce_rate_limit(request, bucket="stats_player", limit=20, window_seconds=60)
-    profile = await _build_player_profile(player_id, db)
+    profile = await _load_player_profile(player_id, db)
     profile.pop("sport_id", None)  # detalle interno, no se expone en el perfil individual
     return profile
 
@@ -321,8 +321,8 @@ async def compare_players(
     if id_a == id_b:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Elige dos jugadores distintos.")
 
-    player_a = await _build_player_profile(id_a, db)
-    player_b = await _build_player_profile(id_b, db)
+    player_a = await _load_player_profile(id_a, db)
+    player_b = await _load_player_profile(id_b, db)
 
     if player_a["sport_id"] is None or player_b["sport_id"] is None:
         raise HTTPException(
