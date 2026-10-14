@@ -10,111 +10,111 @@
  */
 const ADMIN_LEAGUE_KEYS = ['mlb'];
 
-let adminTapCount = 0;
-let adminTapTimer = null;
+let footerTapCount = 0;
+let footerTapResetTimer = null;
 
 function toggleAdminPanel() {
-  const panel = document.getElementById('admin-panel');
-  if (!panel) return;
+  const adminPanel = document.getElementById('admin-panel');
+  if (!adminPanel) return;
   // Si quien toca no es el admin (o no ha iniciado sesión), los 5 taps no
   // hacen nada visible — nada distingue "no soy admin" de "no pasó nada".
   if (!window.currentUser?.is_admin) return;
-  panel.classList.toggle('hidden');
-  if (!panel.classList.contains('hidden')) {
+  adminPanel.classList.toggle('hidden');
+  if (!adminPanel.classList.contains('hidden')) {
     renderAdminLeagueOptions();
     loadAdminLeagues();
   }
 }
 
 function renderAdminLeagueOptions() {
-  const select = document.getElementById('admin-league-select');
-  if (!select || select.dataset.filled) return;
-  select.innerHTML = ADMIN_LEAGUE_KEYS.map((key) => `<option value="${esc(key)}">${esc(key)}</option>`).join('');
-  select.dataset.filled = 'true';
+  const leagueSelect = document.getElementById('admin-league-select');
+  if (!leagueSelect || leagueSelect.dataset.filled) return;
+  leagueSelect.innerHTML = ADMIN_LEAGUE_KEYS.map((leagueKey) => `<option value="${esc(leagueKey)}">${esc(leagueKey)}</option>`).join('');
+  leagueSelect.dataset.filled = 'true';
 }
 
 async function loadAdminTeams() {
-  const select = document.getElementById('admin-league-select');
-  const listEl = document.getElementById('admin-team-list');
-  if (!select || !listEl) return;
+  const leagueSelect = document.getElementById('admin-league-select');
+  const teamListContainer = document.getElementById('admin-team-list');
+  if (!leagueSelect || !teamListContainer) return;
 
-  listEl.innerHTML = 'Cargando…';
+  teamListContainer.innerHTML = 'Cargando…';
   try {
-    const teams = await api.get(`/admin/teams?league_key=${select.value}`);
-    if (!teams.length) {
-      listEl.innerHTML = '<p>No hay equipos en esta liga.</p>';
+    const teamRows = await api.get(`/admin/teams?league_key=${leagueSelect.value}`);
+    if (!teamRows.length) {
+      teamListContainer.innerHTML = '<p>No hay equipos en esta liga.</p>';
     } else {
-      listEl.innerHTML = teams
+      teamListContainer.innerHTML = teamRows
         .map(
-          (team) => `
-        <div class="admin-team-row" data-team-id="${Number(team.id)}">
+          (teamRow) => `
+        <div class="admin-team-row" data-team-id="${Number(teamRow.id)}">
           <span>
-            ${esc(team.name || '(sin nombre)')}
-            ${team.is_placeholder ? ' · placeholder' : ''}
-            ${!team.conference && !team.division ? ' · sin conferencia/división' : ''}
+            ${esc(teamRow.name || '(sin nombre)')}
+            ${teamRow.is_placeholder ? ' · placeholder' : ''}
+            ${!teamRow.conference && !teamRow.division ? ' · sin conferencia/división' : ''}
           </span>
-          <button class="btn btn-danger btn-small admin-delete-btn" data-team-id="${Number(team.id)}" data-team-name="${esc(team.name || '')}">
+          <button class="btn btn-danger btn-small admin-delete-btn" data-team-id="${Number(teamRow.id)}" data-team-name="${esc(teamRow.name || '')}">
             Borrar
           </button>
         </div>`
         )
         .join('');
 
-      listEl.querySelectorAll('.admin-delete-btn').forEach((btn) => {
-        btn.addEventListener('click', () => handleAdminDelete(btn.dataset.teamId, btn.dataset.teamName));
+      teamListContainer.querySelectorAll('.admin-delete-btn').forEach((deleteButton) => {
+        deleteButton.addEventListener('click', () => handleAdminDelete(deleteButton.dataset.teamId, deleteButton.dataset.teamName));
       });
     }
-  } catch (err) {
-    listEl.innerHTML = `<p>${esc(err.message)}</p>`;
+  } catch (loadError) {
+    teamListContainer.innerHTML = `<p>${esc(loadError.message)}</p>`;
   }
 
   loadExcludedTeams();
 }
 
 async function loadExcludedTeams() {
-  const select = document.getElementById('admin-league-select');
-  const listEl = document.getElementById('admin-excluded-list');
-  if (!select || !listEl) return;
+  const leagueSelect = document.getElementById('admin-league-select');
+  const excludedListContainer = document.getElementById('admin-excluded-list');
+  if (!leagueSelect || !excludedListContainer) return;
 
   try {
-    const excluded = await api.get(`/admin/excluded-teams?league_key=${select.value}`);
-    if (!excluded.length) {
-      listEl.innerHTML = '';
+    const excludedTeams = await api.get(`/admin/excluded-teams?league_key=${leagueSelect.value}`);
+    if (!excludedTeams.length) {
+      excludedListContainer.innerHTML = '';
       return;
     }
-    listEl.innerHTML =
+    excludedListContainer.innerHTML =
       '<h4 class="stats-section-label">Borrados (se pueden restaurar)</h4>' +
-      excluded
+      excludedTeams
         .map(
-          (e) => `
+          (excludedEntry) => `
       <div class="admin-team-row">
-        <span>${esc(e.team_name || e.external_id)}</span>
-        <button class="btn btn-outline btn-small admin-restore-btn" data-excluded-id="${Number(e.id)}">
+        <span>${esc(excludedEntry.team_name || excludedEntry.external_id)}</span>
+        <button class="btn btn-outline btn-small admin-restore-btn" data-excluded-id="${Number(excludedEntry.id)}">
           Restaurar
         </button>
       </div>`
         )
         .join('');
 
-    listEl.querySelectorAll('.admin-restore-btn').forEach((btn) => {
-      btn.addEventListener('click', () => handleAdminRestore(btn.dataset.excludedId));
+    excludedListContainer.querySelectorAll('.admin-restore-btn').forEach((restoreButton) => {
+      restoreButton.addEventListener('click', () => handleAdminRestore(restoreButton.dataset.excludedId));
     });
-  } catch (err) {
-    listEl.innerHTML = `<p>${esc(err.message)}</p>`;
+  } catch (loadError) {
+    excludedListContainer.innerHTML = `<p>${esc(loadError.message)}</p>`;
   }
 }
 
 async function handleAdminDelete(teamId, teamName) {
-  const confirmed = window.confirm(
+  const isConfirmed = window.confirm(
     `¿Borrar "${teamName}"? También borra sus partidos, jugadores y favoritos asociados. Puedes restaurarlo después desde "Borrados" si te equivocas.`
   );
-  if (!confirmed) return;
+  if (!isConfirmed) return;
 
   try {
     await api.delete(`/admin/teams/${teamId}`);
     loadAdminTeams();
-  } catch (err) {
-    window.alert(err.message);
+  } catch (deleteError) {
+    window.alert(deleteError.message);
   }
 }
 
@@ -123,57 +123,57 @@ async function handleAdminRestore(excludedId) {
     await api.delete(`/admin/excluded-teams/${excludedId}`);
     window.alert('Restaurado. Puede tardar hasta 5 minutos en volver a aparecer (la próxima sincronización lo recrea).');
     loadAdminTeams();
-  } catch (err) {
-    window.alert(err.message);
+  } catch (restoreError) {
+    window.alert(restoreError.message);
   }
 }
 
 async function loadAdminLeagues() {
-  const listEl = document.getElementById('admin-leagues-list');
-  if (!listEl) return;
+  const leaguesListContainer = document.getElementById('admin-leagues-list');
+  if (!leaguesListContainer) return;
 
-  listEl.innerHTML = 'Cargando…';
+  leaguesListContainer.innerHTML = 'Cargando…';
   try {
-    const leagues = await api.get('/admin/leagues');
-    listEl.innerHTML = leagues
+    const leagueRows = await api.get('/admin/leagues');
+    leaguesListContainer.innerHTML = leagueRows
       .map(
-        (lg) => `
+        (leagueRow) => `
       <div class="admin-team-row">
         <span>
-          ${esc(lg.name)} · ${Number(lg.team_count)} equipo(s)
-          ${!lg.sync_enabled ? ' · <strong>borrada</strong>' : ''}
+          ${esc(leagueRow.name)} · ${Number(leagueRow.team_count)} equipo(s)
+          ${!leagueRow.sync_enabled ? ' · <strong>borrada</strong>' : ''}
         </span>
         ${
-          lg.sync_enabled
-            ? `<button class="btn btn-danger btn-small admin-delete-league-btn" data-league-key="${esc(lg.key)}" data-league-name="${esc(lg.name)}">Borrar liga</button>`
-            : `<button class="btn btn-outline btn-small admin-enable-league-btn" data-league-key="${esc(lg.key)}">Reactivar</button>`
+          leagueRow.sync_enabled
+            ? `<button class="btn btn-danger btn-small admin-delete-league-btn" data-league-key="${esc(leagueRow.key)}" data-league-name="${esc(leagueRow.name)}">Borrar liga</button>`
+            : `<button class="btn btn-outline btn-small admin-enable-league-btn" data-league-key="${esc(leagueRow.key)}">Reactivar</button>`
         }
       </div>`
       )
       .join('');
 
-    listEl.querySelectorAll('.admin-delete-league-btn').forEach((btn) => {
-      btn.addEventListener('click', () => handleDeleteLeague(btn.dataset.leagueKey, btn.dataset.leagueName));
+    leaguesListContainer.querySelectorAll('.admin-delete-league-btn').forEach((deleteButton) => {
+      deleteButton.addEventListener('click', () => handleDeleteLeague(deleteButton.dataset.leagueKey, deleteButton.dataset.leagueName));
     });
-    listEl.querySelectorAll('.admin-enable-league-btn').forEach((btn) => {
-      btn.addEventListener('click', () => handleEnableLeague(btn.dataset.leagueKey));
+    leaguesListContainer.querySelectorAll('.admin-enable-league-btn').forEach((enableButton) => {
+      enableButton.addEventListener('click', () => handleEnableLeague(enableButton.dataset.leagueKey));
     });
-  } catch (err) {
-    listEl.innerHTML = `<p>${esc(err.message)}</p>`;
+  } catch (loadError) {
+    leaguesListContainer.innerHTML = `<p>${esc(loadError.message)}</p>`;
   }
 }
 
 async function handleDeleteLeague(leagueKey, leagueName) {
-  const confirmed = window.confirm(
+  const isConfirmed = window.confirm(
     `¿Borrar TODA la liga "${leagueName}"? Esto borra todos sus equipos, partidos, jugadores y favoritos, y detiene su sincronización automática (útil para un evento ya pasado). Se puede reactivar después desde este mismo panel.`
   );
-  if (!confirmed) return;
+  if (!isConfirmed) return;
 
   try {
     await api.delete(`/admin/leagues/${leagueKey}`);
     loadAdminLeagues();
-  } catch (err) {
-    window.alert(err.message);
+  } catch (deleteError) {
+    window.alert(deleteError.message);
   }
 }
 
@@ -182,28 +182,28 @@ async function handleEnableLeague(leagueKey) {
     await api.post(`/admin/leagues/${leagueKey}/enable`, {});
     window.alert('Reactivada. Sus datos se vuelven a sincronizar solos en los próximos minutos.');
     loadAdminLeagues();
-  } catch (err) {
-    window.alert(err.message);
+  } catch (enableError) {
+    window.alert(enableError.message);
   }
 }
 
 function initAdminPanel() {
   const footer = document.getElementById('app-footer');
-  const loadBtn = document.getElementById('admin-load-btn');
+  const loadButton = document.getElementById('admin-load-btn');
   if (footer) {
     footer.addEventListener('click', () => {
-      adminTapCount += 1;
-      clearTimeout(adminTapTimer);
-      adminTapTimer = setTimeout(() => {
-        adminTapCount = 0;
+      footerTapCount += 1;
+      clearTimeout(footerTapResetTimer);
+      footerTapResetTimer = setTimeout(() => {
+        footerTapCount = 0;
       }, 2000);
-      if (adminTapCount >= 5) {
-        adminTapCount = 0;
+      if (footerTapCount >= 5) {
+        footerTapCount = 0;
         toggleAdminPanel();
       }
     });
   }
-  if (loadBtn) loadBtn.addEventListener('click', loadAdminTeams);
+  if (loadButton) loadButton.addEventListener('click', loadAdminTeams);
 }
 
 document.addEventListener('DOMContentLoaded', initAdminPanel);

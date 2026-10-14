@@ -19,25 +19,25 @@ function esc(value) {
     .replace(/'/g, '&#39;');
 }
 
-function _isHttpUrl(parsed) {
-  return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+function _isHttpUrl(parsedUrl) {
+  return parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:';
 }
 
 function safeUrl(value) {
   if (value === null || value === undefined) return '#';
-  const raw = String(value).trim();
-  if (!raw || raw.startsWith('#')) return raw || '#';
+  const rawUrl = String(value).trim();
+  if (!rawUrl || rawUrl.startsWith('#')) return rawUrl || '#';
   // Rutas relativas ("/x", "x/y", "./x", "?q=1") sin esquema: seguras.
-  if (raw.startsWith('/') || raw.startsWith('./') || raw.startsWith('../') || raw.startsWith('?')) return raw;
+  if (rawUrl.startsWith('/') || rawUrl.startsWith('./') || rawUrl.startsWith('../') || rawUrl.startsWith('?')) return rawUrl;
   try {
-    const parsed = new URL(raw, window.location.origin);
+    const parsedUrl = new URL(rawUrl, window.location.origin);
     // Si el input no traía esquema, URL lo resolvió contra el origen:
     // solo se acepta si quedó en el mismo origen (relativa real).
-    const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw);
+    const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(rawUrl);
     if (!hasScheme) {
-      return parsed.origin === window.location.origin ? raw : '#';
+      return parsedUrl.origin === window.location.origin ? rawUrl : '#';
     }
-    return _isHttpUrl(parsed) ? parsed.href : '#';
+    return _isHttpUrl(parsedUrl) ? parsedUrl.href : '#';
   } catch (_) {
     return '#';
   }
@@ -45,15 +45,15 @@ function safeUrl(value) {
 
 function safeImg(value) {
   if (value === null || value === undefined) return '';
-  const raw = String(value).trim();
-  if (!raw) return '';
-  if (raw.startsWith('data:image/')) {
+  const rawUrl = String(value).trim();
+  if (!rawUrl) return '';
+  if (rawUrl.startsWith('data:image/')) {
     // data:image/png;base64,... — se acepta solo si no contiene < o ".
-    if (/[<"]/.test(raw)) return '';
-    return raw;
+    if (/[<"]/.test(rawUrl)) return '';
+    return rawUrl;
   }
-  const out = safeUrl(raw);
-  return out === '#' ? '' : out;
+  const sanitizedUrl = safeUrl(rawUrl);
+  return sanitizedUrl === '#' ? '' : sanitizedUrl;
 }
 
 // Exposición global (scripts clásicos, sin bundler).

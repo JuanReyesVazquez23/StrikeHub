@@ -3,63 +3,63 @@
  * elige de una lista de sugerencias reales, traídas de /stats/search.
  * El resultado se muestra como una tarjeta legible, no como JSON crudo.
  */
-let statsDebounceTimer = null;
-let statsSelectedType = 'team';
-let compareMode = false;
-let firstComparedEntity = null; // {id, label} del primer elemento elegido en modo comparación
+let searchDebounceTimer = null;
+let selectedEntityType = 'team';
+let isCompareMode = false;
+let firstCompareSelection = null; // {id, label} del primer elemento elegido en modo comparación
 // Contador anti-races: si el usuario escribe o cambia de pestaña mientras un
 // fetch está en vuelo, la respuesta vieja se descarta en vez de pintar
 // sugerencias del deporte/texto anterior.
-let statsRequestSeq = 0;
+let statsRequestSequence = 0;
 
-function outcomeLabel(outcome) {
-  return outcome === 'W' ? t('stats.win') : t('stats.loss');
+function formatOutcomeLabel(outcomeCode) {
+  return outcomeCode === 'W' ? t('stats.win') : t('stats.loss');
 }
 
-function compareRow(labelKey, valueA, valueB) {
+function renderCompareRow(labelKey, firstValue, secondValue) {
   return `
     <tr>
-      <td class="compare-value">${esc(valueA ?? '-')}</td>
+      <td class="compare-value">${esc(firstValue ?? '-')}</td>
       <td class="compare-label">${t(labelKey)}</td>
-      <td class="compare-value">${esc(valueB ?? '-')}</td>
+      <td class="compare-value">${esc(secondValue ?? '-')}</td>
     </tr>`;
 }
 
-function renderPlayerCompareCard(data) {
-  const a = data.player_a;
-  const b = data.player_b;
-  const ba = a.batting_stats || {};
-  const bb = b.batting_stats || {};
-  const pa = a.pitching_stats || {};
-  const pb = b.pitching_stats || {};
-  const hasBatting = a.batting_stats || b.batting_stats;
-  const hasPitching = a.pitching_stats || b.pitching_stats;
+function renderPlayerCompareCard(comparisonData) {
+  const firstPlayer = comparisonData.player_a;
+  const secondPlayer = comparisonData.player_b;
+  const firstBatting = firstPlayer.batting_stats || {};
+  const secondBatting = secondPlayer.batting_stats || {};
+  const firstPitching = firstPlayer.pitching_stats || {};
+  const secondPitching = secondPlayer.pitching_stats || {};
+  const hasBatting = firstPlayer.batting_stats || secondPlayer.batting_stats;
+  const hasPitching = firstPlayer.pitching_stats || secondPlayer.pitching_stats;
 
   return `
     <div class="stats-card">
       <div class="compare-header-row">
         <div class="compare-header-side">
-          ${a.team?.logo_url ? `<img src="${esc(safeImg(a.team.logo_url))}" alt="" loading="lazy" decoding="async">` : ''}
-          <h3>${esc(a.full_name)}</h3>
-          <span class="stats-subtitle">${a.team ? esc(a.team.name) : ''}</span>
+          ${firstPlayer.team?.logo_url ? `<img src="${esc(safeImg(firstPlayer.team.logo_url))}" alt="" loading="lazy" decoding="async">` : ''}
+          <h3>${esc(firstPlayer.full_name)}</h3>
+          <span class="stats-subtitle">${firstPlayer.team ? esc(firstPlayer.team.name) : ''}</span>
         </div>
         <span class="compare-vs">VS</span>
         <div class="compare-header-side">
-          ${b.team?.logo_url ? `<img src="${esc(safeImg(b.team.logo_url))}" alt="" loading="lazy" decoding="async">` : ''}
-          <h3>${esc(b.full_name)}</h3>
-          <span class="stats-subtitle">${b.team ? esc(b.team.name) : ''}</span>
+          ${secondPlayer.team?.logo_url ? `<img src="${esc(safeImg(secondPlayer.team.logo_url))}" alt="" loading="lazy" decoding="async">` : ''}
+          <h3>${esc(secondPlayer.full_name)}</h3>
+          <span class="stats-subtitle">${secondPlayer.team ? esc(secondPlayer.team.name) : ''}</span>
         </div>
       </div>
       ${
         hasBatting
           ? `<h4 class="stats-section-label">${t('stats.battingStats')}</h4>
         <table class="compare-table">
-          ${compareRow('stats.avg', ba.avg, bb.avg)}
-          ${compareRow('stats.homeRuns', ba.home_runs, bb.home_runs)}
-          ${compareRow('stats.hits', ba.hits, bb.hits)}
-          ${compareRow('stats.rbi', ba.rbi, bb.rbi)}
-          ${compareRow('stats.obp', ba.obp, bb.obp)}
-          ${compareRow('stats.ops', ba.ops, bb.ops)}
+          ${renderCompareRow('stats.avg', firstBatting.avg, secondBatting.avg)}
+          ${renderCompareRow('stats.homeRuns', firstBatting.home_runs, secondBatting.home_runs)}
+          ${renderCompareRow('stats.hits', firstBatting.hits, secondBatting.hits)}
+          ${renderCompareRow('stats.rbi', firstBatting.rbi, secondBatting.rbi)}
+          ${renderCompareRow('stats.obp', firstBatting.obp, secondBatting.obp)}
+          ${renderCompareRow('stats.ops', firstBatting.ops, secondBatting.ops)}
         </table>`
           : ''
       }
@@ -67,9 +67,9 @@ function renderPlayerCompareCard(data) {
         hasPitching
           ? `<h4 class="stats-section-label">${t('stats.pitchingStats')}</h4>
         <table class="compare-table">
-          ${compareRow('stats.era', pa.era, pb.era)}
-          ${compareRow('stats.strikeouts', pa.strikeouts, pb.strikeouts)}
-          ${compareRow('stats.saves', pa.saves, pb.saves)}
+          ${renderCompareRow('stats.era', firstPitching.era, secondPitching.era)}
+          ${renderCompareRow('stats.strikeouts', firstPitching.strikeouts, secondPitching.strikeouts)}
+          ${renderCompareRow('stats.saves', firstPitching.saves, secondPitching.saves)}
         </table>`
           : ''
       }
@@ -81,43 +81,43 @@ function renderPlayerCompareCard(data) {
     </div>`;
 }
 
-function renderTeamCompareCard(data) {
-  const a = data.team_a;
-  const b = data.team_b;
+function renderTeamCompareCard(comparisonData) {
+  const firstTeam = comparisonData.team_a;
+  const secondTeam = comparisonData.team_b;
 
   return `
     <div class="stats-card">
       <div class="compare-header-row">
         <div class="compare-header-side">
-          ${a.logo_url ? `<img src="${esc(safeImg(a.logo_url))}" alt="" loading="lazy" decoding="async">` : ''}
-          <h3>${esc(a.name)}</h3>
-          <span class="stats-subtitle">${esc(a.league || '')}</span>
+          ${firstTeam.logo_url ? `<img src="${esc(safeImg(firstTeam.logo_url))}" alt="" loading="lazy" decoding="async">` : ''}
+          <h3>${esc(firstTeam.name)}</h3>
+          <span class="stats-subtitle">${esc(firstTeam.league || '')}</span>
         </div>
         <span class="compare-vs">VS</span>
         <div class="compare-header-side">
-          ${b.logo_url ? `<img src="${esc(safeImg(b.logo_url))}" alt="" loading="lazy" decoding="async">` : ''}
-          <h3>${esc(b.name)}</h3>
-          <span class="stats-subtitle">${esc(b.league || '')}</span>
+          ${secondTeam.logo_url ? `<img src="${esc(safeImg(secondTeam.logo_url))}" alt="" loading="lazy" decoding="async">` : ''}
+          <h3>${esc(secondTeam.name)}</h3>
+          <span class="stats-subtitle">${esc(secondTeam.league || '')}</span>
         </div>
       </div>
       <table class="compare-table">
-        ${compareRow('stats.wins', a.record.wins, b.record.wins)}
-        ${compareRow('stats.losses', a.record.losses, b.record.losses)}
-        ${compareRow('stats.winPct', `${(a.record.win_pct * 100).toFixed(1)}%`, `${(b.record.win_pct * 100).toFixed(1)}%`)}
+        ${renderCompareRow('stats.wins', firstTeam.record.wins, secondTeam.record.wins)}
+        ${renderCompareRow('stats.losses', firstTeam.record.losses, secondTeam.record.losses)}
+        ${renderCompareRow('stats.winPct', `${(firstTeam.record.win_pct * 100).toFixed(1)}%`, `${(secondTeam.record.win_pct * 100).toFixed(1)}%`)}
       </table>
     </div>`;
 }
 
-function renderTeamCard(team) {
-  const resultsHtml = team.recent_results.length
-    ? team.recent_results
+function renderTeamCard(teamProfile) {
+  const recentResultsHtml = teamProfile.recent_results.length
+    ? teamProfile.recent_results
         .map(
-          (r) => `
+          (gameResult) => `
         <div class="stats-result-row">
-          <span class="outcome-tag ${r.outcome === 'W' ? 'win' : 'loss'}">${esc(outcomeLabel(r.outcome))}</span>
-          <span>${esc(r.rival)}</span>
-          <span class="stats-mono">${esc(r.score)}</span>
-          <span class="stats-mono">${esc(r.date)}</span>
+          <span class="outcome-tag ${gameResult.outcome === 'W' ? 'win' : 'loss'}">${esc(formatOutcomeLabel(gameResult.outcome))}</span>
+          <span>${esc(gameResult.rival)}</span>
+          <span class="stats-mono">${esc(gameResult.score)}</span>
+          <span class="stats-mono">${esc(gameResult.date)}</span>
         </div>`
         )
         .join('')
@@ -126,208 +126,207 @@ function renderTeamCard(team) {
   return `
     <div class="stats-card">
       <div class="stats-card-header">
-        ${team.logo_url ? `<img src="${esc(safeImg(team.logo_url))}" alt="" loading="lazy" decoding="async">` : ''}
+        ${teamProfile.logo_url ? `<img src="${esc(safeImg(teamProfile.logo_url))}" alt="" loading="lazy" decoding="async">` : ''}
         <div>
-          <h3>${esc(team.name)}</h3>
-          <span class="stats-subtitle">${esc(team.league || '')} ${team.division ? '· ' + esc(team.division) : ''}</span>
+          <h3>${esc(teamProfile.name)}</h3>
+          <span class="stats-subtitle">${esc(teamProfile.league || '')} ${teamProfile.division ? '· ' + esc(teamProfile.division) : ''}</span>
         </div>
       </div>
       <div class="stats-record-row">
-        <div><strong>${team.record.wins}</strong><span>${t('stats.wins')}</span></div>
-        <div><strong>${team.record.losses}</strong><span>${t('stats.losses')}</span></div>
-        <div><strong>${(team.record.win_pct * 100).toFixed(1)}%</strong><span>${t('stats.winPct')}</span></div>
+        <div><strong>${teamProfile.record.wins}</strong><span>${t('stats.wins')}</span></div>
+        <div><strong>${teamProfile.record.losses}</strong><span>${t('stats.losses')}</span></div>
+        <div><strong>${(teamProfile.record.win_pct * 100).toFixed(1)}%</strong><span>${t('stats.winPct')}</span></div>
       </div>
       <h4 class="stats-section-label">${t('stats.recentResults')}</h4>
-      ${resultsHtml}
+      ${recentResultsHtml}
     </div>`;
 }
 
-function renderBattingStatsBlock(stats) {
-  if (!stats) return '';
+function renderBattingStatsBlock(battingStats) {
+  if (!battingStats) return '';
   return `
     <h4 class="stats-section-label">${t('stats.battingStats')}</h4>
     <div class="stats-record-row stats-record-wrap">
-      <div><strong>${stats.avg ?? '-'}</strong><span>${t('stats.avg')}</span></div>
-      <div><strong>${stats.home_runs ?? 0}</strong><span>${t('stats.homeRuns')}</span></div>
-      <div><strong>${stats.hits ?? 0}</strong><span>${t('stats.hits')}</span></div>
-      <div><strong>${stats.rbi ?? 0}</strong><span>${t('stats.rbi')}</span></div>
-      <div><strong>${stats.obp ?? '-'}</strong><span>${t('stats.obp')}</span></div>
-      <div><strong>${stats.slg ?? '-'}</strong><span>${t('stats.slg')}</span></div>
-      <div><strong>${stats.ops ?? '-'}</strong><span>${t('stats.ops')}</span></div>
-      <div><strong>${stats.stolen_bases ?? 0}</strong><span>${t('stats.stolenBases')}</span></div>
+      <div><strong>${battingStats.avg ?? '-'}</strong><span>${t('stats.avg')}</span></div>
+      <div><strong>${battingStats.home_runs ?? 0}</strong><span>${t('stats.homeRuns')}</span></div>
+      <div><strong>${battingStats.hits ?? 0}</strong><span>${t('stats.hits')}</span></div>
+      <div><strong>${battingStats.rbi ?? 0}</strong><span>${t('stats.rbi')}</span></div>
+      <div><strong>${battingStats.obp ?? '-'}</strong><span>${t('stats.obp')}</span></div>
+      <div><strong>${battingStats.slg ?? '-'}</strong><span>${t('stats.slg')}</span></div>
+      <div><strong>${battingStats.ops ?? '-'}</strong><span>${t('stats.ops')}</span></div>
+      <div><strong>${battingStats.stolen_bases ?? 0}</strong><span>${t('stats.stolenBases')}</span></div>
     </div>`;
 }
 
-function renderPitchingStatsBlock(stats) {
-  if (!stats) return '';
+function renderPitchingStatsBlock(pitchingStats) {
+  if (!pitchingStats) return '';
   return `
     <h4 class="stats-section-label">${t('stats.pitchingStats')}</h4>
     <div class="stats-record-row stats-record-wrap">
-      <div><strong>${stats.wins ?? 0}-${stats.losses ?? 0}</strong><span>${t('stats.record')}</span></div>
-      <div><strong>${stats.era ?? '-'}</strong><span>${t('stats.era')}</span></div>
-      <div><strong>${stats.strikeouts ?? 0}</strong><span>${t('stats.strikeouts')}</span></div>
-      <div><strong>${stats.saves ?? 0}</strong><span>${t('stats.saves')}</span></div>
-      <div><strong>${stats.innings_pitched ?? '-'}</strong><span>${t('stats.inningsPitched')}</span></div>
-      <div><strong>${stats.whip ?? '-'}</strong><span>WHIP</span></div>
+      <div><strong>${pitchingStats.wins ?? 0}-${pitchingStats.losses ?? 0}</strong><span>${t('stats.record')}</span></div>
+      <div><strong>${pitchingStats.era ?? '-'}</strong><span>${t('stats.era')}</span></div>
+      <div><strong>${pitchingStats.strikeouts ?? 0}</strong><span>${t('stats.strikeouts')}</span></div>
+      <div><strong>${pitchingStats.saves ?? 0}</strong><span>${t('stats.saves')}</span></div>
+      <div><strong>${pitchingStats.innings_pitched ?? '-'}</strong><span>${t('stats.inningsPitched')}</span></div>
+      <div><strong>${pitchingStats.whip ?? '-'}</strong><span>WHIP</span></div>
     </div>`;
 }
 
-function renderPlayerCard(player) {
-  const hasStats = player.batting_stats || player.pitching_stats;
+function renderPlayerCard(playerProfile) {
+  const hasStatLines = playerProfile.batting_stats || playerProfile.pitching_stats;
   return `
     <div class="stats-card">
       <div class="stats-card-header">
-        ${player.team?.logo_url ? `<img src="${esc(safeImg(player.team.logo_url))}" alt="" loading="lazy" decoding="async">` : ''}
+        ${playerProfile.team?.logo_url ? `<img src="${esc(safeImg(playerProfile.team.logo_url))}" alt="" loading="lazy" decoding="async">` : ''}
         <div>
-          <h3>${esc(player.full_name)}</h3>
+          <h3>${esc(playerProfile.full_name)}</h3>
           <span class="stats-subtitle">
-            ${esc(player.position || '')} ${player.jersey_number ? '· #' + Number(player.jersey_number) : ''}
-            ${player.team ? '· ' + esc(player.team.name) : ''}
+            ${esc(playerProfile.position || '')} ${playerProfile.jersey_number ? '· #' + Number(playerProfile.jersey_number) : ''}
+            ${playerProfile.team ? '· ' + esc(playerProfile.team.name) : ''}
           </span>
         </div>
       </div>
-      ${renderBattingStatsBlock(player.batting_stats)}
-      ${renderPitchingStatsBlock(player.pitching_stats)}
-      ${!hasStats ? `<p class="empty-state">${t('stats.noStatsYet')}</p>` : ''}
+      ${renderBattingStatsBlock(playerProfile.batting_stats)}
+      ${renderPitchingStatsBlock(playerProfile.pitching_stats)}
+      ${!hasStatLines ? `<p class="empty-state">${t('stats.noStatsYet')}</p>` : ''}
     </div>`;
 }
 
-async function fetchSuggestions(query) {
-  const suggestionsBox = document.getElementById('stats-suggestions');
-  const mySeq = ++statsRequestSeq;
-  if (query.length < 2) {
-    suggestionsBox.classList.add('hidden');
+async function fetchSuggestions(searchText) {
+  const suggestionsDropdown = document.getElementById('stats-suggestions');
+  const requestSequence = ++statsRequestSequence;
+  if (searchText.length < 2) {
+    suggestionsDropdown.classList.add('hidden');
     return;
   }
   try {
-    const results = await api.get(`/stats/search?q=${encodeURIComponent(query)}&type=${statsSelectedType}&sport=baseball`);
+    const searchResults = await api.get(`/stats/search?q=${encodeURIComponent(searchText)}&type=${selectedEntityType}&sport=baseball`);
     // Respuesta vieja (el usuario siguió escribiendo o cambió de pestaña):
     // se descarta sin tocar el DOM.
-    if (mySeq !== statsRequestSeq) return;
-    if (document.getElementById('stats-query')?.value !== query) return;
-    if (!results.length) {
-      suggestionsBox.innerHTML = `<div class="stats-suggestion-empty">${t('stats.noMatches')}</div>`;
-      suggestionsBox.classList.remove('hidden');
+    if (requestSequence !== statsRequestSequence) return;
+    if (document.getElementById('stats-query')?.value !== searchText) return;
+    if (!searchResults.length) {
+      suggestionsDropdown.innerHTML = `<div class="stats-suggestion-empty">${t('stats.noMatches')}</div>`;
+      suggestionsDropdown.classList.remove('hidden');
       return;
     }
-    suggestionsBox.innerHTML = results
+    suggestionsDropdown.innerHTML = searchResults
       .map(
-        (r) => `
-        <button type="button" class="stats-suggestion-item" data-id="${Number(r.id)}" data-type="${esc(r.type)}" data-label="${esc(r.label)}">
-          ${r.logo_url ? `<img src="${esc(safeImg(r.logo_url))}" alt="" loading="lazy" decoding="async">` : ''}
-          <span>${esc(r.label)}</span>
-          <small>${esc(r.sublabel || '')}</small>
+        (resultItem) => `
+        <button type="button" class="stats-suggestion-item" data-id="${Number(resultItem.id)}" data-type="${esc(resultItem.type)}" data-label="${esc(resultItem.label)}">
+          ${resultItem.logo_url ? `<img src="${esc(safeImg(resultItem.logo_url))}" alt="" loading="lazy" decoding="async">` : ''}
+          <span>${esc(resultItem.label)}</span>
+          <small>${esc(resultItem.sublabel || '')}</small>
         </button>`
       )
       .join('');
-    suggestionsBox.classList.remove('hidden');
+    suggestionsDropdown.classList.remove('hidden');
 
-    suggestionsBox.querySelectorAll('.stats-suggestion-item').forEach((btn) => {
-      btn.addEventListener('click', () => selectStatsResult(btn.dataset.type, btn.dataset.id, btn.dataset.label));
+    suggestionsDropdown.querySelectorAll('.stats-suggestion-item').forEach((suggestionButton) => {
+      suggestionButton.addEventListener('click', () => selectStatsResult(suggestionButton.dataset.type, suggestionButton.dataset.id, suggestionButton.dataset.label));
     });
-  } catch (err) {
-    suggestionsBox.classList.add('hidden');
+  } catch (_) {
+    suggestionsDropdown.classList.add('hidden');
   }
 }
 
-async function selectStatsResult(type, id, label) {
+async function selectStatsResult(entityType, entityId, entityLabel) {
   document.getElementById('stats-suggestions').classList.add('hidden');
-  const resultEl = document.getElementById('stats-result');
-  const statusEl = document.getElementById('stats-compare-status');
-  const input = document.getElementById('stats-query');
+  const resultContainer = document.getElementById('stats-result');
+  const statusBanner = document.getElementById('stats-compare-status');
+  const searchInput = document.getElementById('stats-query');
 
-  if (compareMode) {
-    if (!firstComparedEntity) {
-      firstComparedEntity = { id, label };
-      input.value = '';
-      statusEl.classList.remove('hidden');
-      const secondKey = statsSelectedType === 'team' ? 'stats.compareNowPickSecondTeam' : 'stats.compareNowPickSecond';
-      statusEl.textContent = `${t('stats.compareFirstPicked')}: ${label}. ${t(secondKey)}`;
+  if (isCompareMode) {
+    if (!firstCompareSelection) {
+      firstCompareSelection = { id: entityId, label: entityLabel };
+      searchInput.value = '';
+      statusBanner.classList.remove('hidden');
+      const secondKey = selectedEntityType === 'team' ? 'stats.compareNowPickSecondTeam' : 'stats.compareNowPickSecond';
+      statusBanner.textContent = `${t('stats.compareFirstPicked')}: ${entityLabel}. ${t(secondKey)}`;
       return;
     }
 
-    resultEl.innerHTML = `<p class="empty-state">${t('common.loading')}</p>`;
+    resultContainer.innerHTML = `<p class="empty-state">${t('common.loading')}</p>`;
     try {
-      const endpoint = type === 'team' ? '/stats/teams/compare' : '/stats/players/compare';
-      const data = await api.get(`${endpoint}?id_a=${Number(firstComparedEntity.id)}&id_b=${Number(id)}`);
-      resultEl.innerHTML = type === 'team' ? renderTeamCompareCard(data) : renderPlayerCompareCard(data);
-    } catch (err) {
-      resultEl.innerHTML = `<p class="empty-state">${esc(err.message)}</p>`;
+      const compareEndpoint = entityType === 'team' ? '/stats/teams/compare' : '/stats/players/compare';
+      const comparisonData = await api.get(`${compareEndpoint}?id_a=${Number(firstCompareSelection.id)}&id_b=${Number(entityId)}`);
+      resultContainer.innerHTML = entityType === 'team' ? renderTeamCompareCard(comparisonData) : renderPlayerCompareCard(comparisonData);
+    } catch (loadError) {
+      resultContainer.innerHTML = `<p class="empty-state">${esc(loadError.message)}</p>`;
     }
-    firstComparedEntity = null;
-    statusEl.classList.add('hidden');
+    firstCompareSelection = null;
+    statusBanner.classList.add('hidden');
     return;
   }
 
-  resultEl.innerHTML = `<p class="empty-state">${t('common.loading')}</p>`;
+  resultContainer.innerHTML = `<p class="empty-state">${t('common.loading')}</p>`;
   try {
-    const data = await api.get(`/stats/${type}/${id}`);
-    resultEl.innerHTML = type === 'team' ? renderTeamCard(data) : renderPlayerCard(data);
-  } catch (err) {
-    resultEl.innerHTML = `<p class="empty-state">${t('common.error')}</p>`;
+    const profileData = await api.get(`/stats/${entityType}/${entityId}`);
+    resultContainer.innerHTML = entityType === 'team' ? renderTeamCard(profileData) : renderPlayerCard(profileData);
+  } catch (_) {
+    resultContainer.innerHTML = `<p class="empty-state">${t('common.error')}</p>`;
   }
 }
 
 function resetStatsSearch() {
-  clearTimeout(statsDebounceTimer);
-  statsRequestSeq++; // invalida cualquier fetch en vuelo
-  const input = document.getElementById('stats-query');
-  const suggestionsBox = document.getElementById('stats-suggestions');
-  const resultEl = document.getElementById('stats-result');
-  const statusEl = document.getElementById('stats-compare-status');
+  clearTimeout(searchDebounceTimer);
+  statsRequestSequence++; // invalida cualquier fetch en vuelo
+  const searchInput = document.getElementById('stats-query');
+  const suggestionsDropdown = document.getElementById('stats-suggestions');
+  const resultContainer = document.getElementById('stats-result');
+  const statusBanner = document.getElementById('stats-compare-status');
   const compareToggle = document.getElementById('stats-compare-toggle');
 
-  if (input) input.value = '';
-  if (suggestionsBox) suggestionsBox.classList.add('hidden');
-  if (resultEl) resultEl.innerHTML = '';
-  if (statusEl) statusEl.classList.add('hidden');
+  if (searchInput) searchInput.value = '';
+  if (suggestionsDropdown) suggestionsDropdown.classList.add('hidden');
+  if (resultContainer) resultContainer.innerHTML = '';
+  if (statusBanner) statusBanner.classList.add('hidden');
   if (compareToggle) compareToggle.checked = false;
-  compareMode = false;
-  firstComparedEntity = null;
+  isCompareMode = false;
+  firstCompareSelection = null;
 }
 
 function initStatsSearch() {
-  const input = document.getElementById('stats-query');
-  const typeSelect = document.getElementById('stats-type');
-  const compareToggleRow = document.getElementById('stats-compare-toggle-row');
+  const searchInput = document.getElementById('stats-query');
+  const entityTypeSelect = document.getElementById('stats-type');
   const compareToggle = document.getElementById('stats-compare-toggle');
-  const statusEl = document.getElementById('stats-compare-status');
-  if (!input) return;
+  const statusBanner = document.getElementById('stats-compare-status');
+  if (!searchInput) return;
 
-  input.addEventListener('input', (e) => {
-    clearTimeout(statsDebounceTimer);
-    const value = e.target.value;
-    statsDebounceTimer = setTimeout(() => fetchSuggestions(value), 300);
+  searchInput.addEventListener('input', (inputEvent) => {
+    clearTimeout(searchDebounceTimer);
+    const inputValue = inputEvent.target.value;
+    searchDebounceTimer = setTimeout(() => fetchSuggestions(inputValue), 300);
   });
 
-  typeSelect.addEventListener('change', (e) => {
-    statsSelectedType = e.target.value;
-    clearTimeout(statsDebounceTimer);
-    statsRequestSeq++; // invalida cualquier fetch en vuelo (era del otro tipo)
-    input.value = '';
+  entityTypeSelect.addEventListener('change', (changeEvent) => {
+    selectedEntityType = changeEvent.target.value;
+    clearTimeout(searchDebounceTimer);
+    statsRequestSequence++; // invalida cualquier fetch en vuelo (era del otro tipo)
+    searchInput.value = '';
     document.getElementById('stats-suggestions').classList.add('hidden');
-    input.placeholder = t(statsSelectedType === 'team' ? 'stats.placeholderTeam' : 'stats.placeholderPlayer');
+    searchInput.placeholder = t(selectedEntityType === 'team' ? 'stats.placeholderTeam' : 'stats.placeholderPlayer');
 
     // El toggle aplica a ambos tipos, pero nunca se cruzan entre sí
     // (comparar siempre es equipo-vs-equipo o jugador-vs-jugador).
     document.getElementById('stats-compare-toggle-label').textContent = t(
-      statsSelectedType === 'team' ? 'stats.compareTeamsToggle' : 'stats.comparePlayersToggle'
+      selectedEntityType === 'team' ? 'stats.compareTeamsToggle' : 'stats.comparePlayersToggle'
     );
     compareToggle.checked = false;
-    compareMode = false;
-    firstComparedEntity = null;
-    statusEl.classList.add('hidden');
+    isCompareMode = false;
+    firstCompareSelection = null;
+    statusBanner.classList.add('hidden');
   });
 
-  compareToggle.addEventListener('change', (e) => {
-    compareMode = e.target.checked;
-    firstComparedEntity = null;
-    statusEl.classList.add('hidden');
+  compareToggle.addEventListener('change', (toggleEvent) => {
+    isCompareMode = toggleEvent.target.checked;
+    firstCompareSelection = null;
+    statusBanner.classList.add('hidden');
     document.getElementById('stats-result').innerHTML = '';
   });
 
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('.stats-autocomplete-wrap')) {
+  document.addEventListener('click', (clickEvent) => {
+    if (!clickEvent.target.closest('.stats-autocomplete-wrap')) {
       document.getElementById('stats-suggestions').classList.add('hidden');
     }
   });

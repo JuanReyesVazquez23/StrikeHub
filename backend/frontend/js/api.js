@@ -27,11 +27,11 @@ async function apiRequest(path, { method = 'GET', body = null } = {}) {
 
   if (response.status === 204) return null;
 
-  let data = null;
+  let responseBody = null;
   try {
-    data = await response.json();
+    responseBody = await response.json();
   } catch (_) {
-    data = null;
+    responseBody = null;
   }
 
   if (!response.ok) {
@@ -39,19 +39,19 @@ async function apiRequest(path, { method = 'GET', body = null } = {}) {
     // validación ({loc, msg}). Se normaliza a string para que el frontend
     // nunca interpole objetos ([object Object]) en el DOM.
     let message = 'Error de comunicación con el servidor.';
-    const detail = data && data.detail;
+    const detail = responseBody && responseBody.detail;
     if (typeof detail === 'string' && detail) {
       message = detail;
     } else if (Array.isArray(detail) && detail.length) {
       message = detail
-        .map((d) => (typeof d === 'string' ? d : d && d.msg ? String(d.msg) : ''))
+        .map((validationError) => (typeof validationError === 'string' ? validationError : validationError && validationError.msg ? String(validationError.msg) : ''))
         .filter(Boolean)
         .join(' · ') || message;
     }
     throw new ApiError(message, response.status);
   }
 
-  return data;
+  return responseBody;
 }
 
 const api = {

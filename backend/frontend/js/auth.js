@@ -9,11 +9,11 @@
 window.currentUser = null;
 
 function renderUserStatus() {
-  const statusEl = document.getElementById('user-status');
-  if (!statusEl) return;
+  const statusContainer = document.getElementById('user-status');
+  if (!statusContainer) return;
 
   if (window.currentUser) {
-    statusEl.innerHTML = `
+    statusContainer.innerHTML = `
       <div class="account-menu">
         <button class="account-menu-toggle" id="account-menu-toggle">
           <span class="points-pill">${Number(window.currentUser.bfb_points)} pts</span>
@@ -26,8 +26,8 @@ function renderUserStatus() {
         </div>
       </div>
     `;
-    document.getElementById('account-menu-toggle').addEventListener('click', (e) => {
-      e.stopPropagation();
+    document.getElementById('account-menu-toggle').addEventListener('click', (clickEvent) => {
+      clickEvent.stopPropagation();
       document.getElementById('account-menu-dropdown').classList.toggle('hidden');
     });
     document.getElementById('logout-btn').addEventListener('click', handleLogout);
@@ -37,7 +37,7 @@ function renderUserStatus() {
     });
     checkForNewPredictionResults();
   } else {
-    statusEl.innerHTML = `
+    statusContainer.innerHTML = `
       <button class="btn btn-primary btn-small" id="login-open-btn" data-i18n="auth.login">${t('auth.login')}</button>
     `;
     document.getElementById('login-open-btn').addEventListener('click', () => openAuthModal('login'));
@@ -47,10 +47,10 @@ function renderUserStatus() {
 }
 
 // Cierra el menú de cuenta si se toca fuera de él.
-document.addEventListener('click', (e) => {
-  const menu = document.getElementById('account-menu-dropdown');
-  if (menu && !menu.classList.contains('hidden') && !e.target.closest('.account-menu')) {
-    menu.classList.add('hidden');
+document.addEventListener('click', (clickEvent) => {
+  const accountMenu = document.getElementById('account-menu-dropdown');
+  if (accountMenu && !accountMenu.classList.contains('hidden') && !clickEvent.target.closest('.account-menu')) {
+    accountMenu.classList.add('hidden');
   }
 });
 
@@ -70,8 +70,8 @@ async function handleLogout() {
 }
 
 function openAuthModal(mode = 'login') {
-  const backdrop = document.getElementById('auth-modal-backdrop');
-  backdrop.classList.remove('hidden');
+  const modalBackdrop = document.getElementById('auth-modal-backdrop');
+  modalBackdrop.classList.remove('hidden');
   setAuthMode(mode);
   document.getElementById('auth-error').textContent = '';
 }
@@ -81,10 +81,10 @@ function closeAuthModal() {
   document.getElementById('auth-form').reset();
 }
 
-function setAuthMode(mode) {
-  const form = document.getElementById('auth-form');
-  form.dataset.mode = mode;
-  const isRegister = mode === 'register';
+function setAuthMode(authMode) {
+  const authForm = document.getElementById('auth-form');
+  authForm.dataset.mode = authMode;
+  const isRegister = authMode === 'register';
 
   document.getElementById('auth-title').textContent = isRegister ? t('auth.register') : t('auth.login');
   document.getElementById('email-field').classList.toggle('hidden', !isRegister);
@@ -93,27 +93,27 @@ function setAuthMode(mode) {
   document.getElementById('auth-switch-btn').textContent = isRegister ? t('auth.loginInstead') : t('auth.createOne');
 }
 
-async function handleAuthSubmit(event) {
-  event.preventDefault();
-  const form = event.target;
-  const mode = form.dataset.mode;
-  const errorEl = document.getElementById('auth-error');
-  errorEl.textContent = '';
+async function handleAuthSubmit(submitEvent) {
+  submitEvent.preventDefault();
+  const authForm = submitEvent.target;
+  const authMode = authForm.dataset.mode;
+  const errorBanner = document.getElementById('auth-error');
+  errorBanner.textContent = '';
 
   const username = document.getElementById('auth-username').value.trim();
   const password = document.getElementById('auth-password').value;
   const email = document.getElementById('auth-email').value.trim();
 
   try {
-    if (mode === 'register') {
+    if (authMode === 'register') {
       window.currentUser = await api.post('/auth/register', { username, email, password });
     } else {
       window.currentUser = await api.post('/auth/login', { username, password });
     }
     renderUserStatus();
     closeAuthModal();
-  } catch (err) {
-    errorEl.textContent = err.message;
+  } catch (authError) {
+    errorBanner.textContent = authError.message;
   }
 }
 
@@ -121,11 +121,11 @@ function initAuth() {
   document.getElementById('auth-form').addEventListener('submit', handleAuthSubmit);
   document.getElementById('auth-modal-close').addEventListener('click', closeAuthModal);
   document.getElementById('auth-switch-btn').addEventListener('click', () => {
-    const form = document.getElementById('auth-form');
-    setAuthMode(form.dataset.mode === 'register' ? 'login' : 'register');
+    const authForm = document.getElementById('auth-form');
+    setAuthMode(authForm.dataset.mode === 'register' ? 'login' : 'register');
   });
-  document.getElementById('auth-modal-backdrop').addEventListener('click', (e) => {
-    if (e.target.id === 'auth-modal-backdrop') closeAuthModal();
+  document.getElementById('auth-modal-backdrop').addEventListener('click', (clickEvent) => {
+    if (clickEvent.target.id === 'auth-modal-backdrop') closeAuthModal();
   });
   refreshCurrentUser();
 }

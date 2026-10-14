@@ -1,40 +1,40 @@
-/**
- * Internacionalización simple basada en diccionarios JSON (es/en).
+﻿/**
+ * InternacionalizaciÃ³n simple basada en diccionarios JSON (es/en).
  * El idioma elegido se guarda en localStorage (dato no sensible: solo una
- * preferencia de interfaz) y, si el usuario tiene sesión iniciada, también
+ * preferencia de interfaz) y, si el usuario tiene sesiÃ³n iniciada, tambiÃ©n
  * se sincroniza con su perfil en el backend.
  */
 const i18nState = {
   lang: localStorage.getItem('bfb_lang') || 'es',
-  dict: {},
+  messages: {},
 };
 
-const I18N_VERSION = '20261017';
+const I18N_VERSION = '20261018';
 
 async function loadDictionary(lang) {
-  const res = await fetch(`i18n/${lang}.json?v=${I18N_VERSION}`);
-  return res.json();
+  const localeResponse = await fetch(`i18n/${lang}.json?v=${I18N_VERSION}`);
+  return localeResponse.json();
 }
 
 function t(key) {
-  const parts = key.split('.');
-  let value = i18nState.dict;
-  for (const part of parts) {
-    value = value?.[part];
+  const keySegments = key.split('.');
+  let currentEntry = i18nState.messages;
+  for (const segment of keySegments) {
+    currentEntry = currentEntry?.[segment];
   }
-  return value ?? key;
+  return currentEntry ?? key;
 }
 
 function applyTranslations() {
-  document.querySelectorAll('[data-i18n]').forEach((el) => {
-    const translated = t(el.dataset.i18n);
-    // Si una versión anterior del diccionario sigue en caché, conserva el
-    // texto escrito en HTML en lugar de mostrar la clave técnica (ej. header.kicker).
-    if (translated !== el.dataset.i18n) el.textContent = translated;
+  document.querySelectorAll('[data-i18n]').forEach((element) => {
+    const translatedText = t(element.dataset.i18n);
+    // Si una versiÃ³n anterior del diccionario sigue en cachÃ©, conserva el
+    // texto escrito en HTML en lugar de mostrar la clave tÃ©cnica (ej. header.kicker).
+    if (translatedText !== element.dataset.i18n) element.textContent = translatedText;
   });
-  document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
-    const translated = t(el.dataset.i18nPlaceholder);
-    if (translated !== el.dataset.i18nPlaceholder) el.placeholder = translated;
+  document.querySelectorAll('[data-i18n-placeholder]').forEach((element) => {
+    const translatedText = t(element.dataset.i18nPlaceholder);
+    if (translatedText !== element.dataset.i18nPlaceholder) element.placeholder = translatedText;
   });
   document.documentElement.lang = i18nState.lang;
 }
@@ -42,10 +42,10 @@ function applyTranslations() {
 async function setLanguage(lang) {
   i18nState.lang = lang;
   localStorage.setItem('bfb_lang', lang);
-  i18nState.dict = await loadDictionary(lang);
+  i18nState.messages = await loadDictionary(lang);
   applyTranslations();
 
-  // Si hay sesión activa, guarda la preferencia en el backend también.
+  // Si hay sesiÃ³n activa, guarda la preferencia en el backend tambiÃ©n.
   if (window.currentUser) {
     api.patch('/auth/me/language', { preferred_language: lang }).catch(() => {});
   }
@@ -54,11 +54,11 @@ async function setLanguage(lang) {
 }
 
 async function initI18n() {
-  i18nState.dict = await loadDictionary(i18nState.lang);
+  i18nState.messages = await loadDictionary(i18nState.lang);
   applyTranslations();
-  const selector = document.getElementById('lang-select');
-  if (selector) {
-    selector.value = i18nState.lang;
-    selector.addEventListener('change', (e) => setLanguage(e.target.value));
+  const languageSelector = document.getElementById('lang-select');
+  if (languageSelector) {
+    languageSelector.value = i18nState.lang;
+    languageSelector.addEventListener('change', (event) => setLanguage(event.target.value));
   }
 }

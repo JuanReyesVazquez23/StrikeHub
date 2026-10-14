@@ -11,7 +11,7 @@
  * este navegador (se guarda en localStorage, no en el servidor — es solo
  * una preferencia de UI de este dispositivo).
  */
-let deferredInstallPrompt = null;
+let deferredInstallEvent = null;
 
 function showInstallBanner() {
   if (localStorage.getItem('bfb_install_dismissed') === 'true') return;
@@ -22,14 +22,14 @@ function hideInstallBanner() {
   document.getElementById('install-app-banner')?.classList.add('hidden');
 }
 
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault(); // evita el banner nativo del navegador; usamos el nuestro, más discreto
-  deferredInstallPrompt = e;
+window.addEventListener('beforeinstallprompt', (installEvent) => {
+  installEvent.preventDefault(); // evita el banner nativo del navegador; usamos el nuestro, más discreto
+  deferredInstallEvent = installEvent;
   showInstallBanner();
 });
 
 window.addEventListener('appinstalled', () => {
-  deferredInstallPrompt = null;
+  deferredInstallEvent = null;
   hideInstallBanner();
 });
 
@@ -41,10 +41,10 @@ function initInstallBanner() {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   document.getElementById('install-app-btn')?.addEventListener('click', async () => {
-    if (!deferredInstallPrompt) return;
-    deferredInstallPrompt.prompt();
-    await deferredInstallPrompt.userChoice;
-    deferredInstallPrompt = null;
+    if (!deferredInstallEvent) return;
+    deferredInstallEvent.prompt();
+    await deferredInstallEvent.userChoice;
+    deferredInstallEvent = null;
     hideInstallBanner();
   });
   document.getElementById('install-app-dismiss')?.addEventListener('click', () => {

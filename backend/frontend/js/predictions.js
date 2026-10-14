@@ -9,137 +9,136 @@
  */
 
 function showToast(message, kind = 'info') {
-  const container = document.getElementById('toast-container');
-  if (!container) return;
+  const toastContainer = document.getElementById('toast-container');
+  if (!toastContainer) return;
 
-  const toast = document.createElement('div');
-  toast.className = `toast toast-${kind}`;
-  toast.textContent = message;
-  container.appendChild(toast);
+  const toastElement = document.createElement('div');
+  toastElement.className = `toast toast-${kind}`;
+  toastElement.textContent = message;
+  toastContainer.appendChild(toastElement);
 
-  setTimeout(() => toast.classList.add('toast-visible'), 10);
+  setTimeout(() => toastElement.classList.add('toast-visible'), 10);
   setTimeout(() => {
-    toast.classList.remove('toast-visible');
-    setTimeout(() => toast.remove(), 300);
+    toastElement.classList.remove('toast-visible');
+    setTimeout(() => toastElement.remove(), 300);
   }, 6000);
 }
 
 function formatMatchup(prediction) {
-  const game = prediction.game;
-  if (!game || !game.home_team || !game.away_team) return '';
-  return `${game.away_team.name} @ ${game.home_team.name}`;
+  const scheduledGame = prediction.game;
+  if (!scheduledGame || !scheduledGame.home_team || !scheduledGame.away_team) return '';
+  return `${scheduledGame.away_team.name} @ ${scheduledGame.home_team.name}`;
 }
 
 async function checkForNewPredictionResults() {
-  let predictions;
+  let storedPredictions;
   try {
-    predictions = await api.get('/predictions/me');
+    storedPredictions = await api.get('/predictions/me');
   } catch (_) {
     return; // sin sesión válida u otro error: no interrumpe el resto de la página
   }
 
-  const unseen = predictions.filter((p) => p.status !== 'pending' && !p.seen);
-  if (!unseen.length) return;
+  const unseenResults = storedPredictions.filter((prediction) => prediction.status !== 'pending' && !prediction.seen);
+  if (!unseenResults.length) return;
 
-  unseen.forEach((p) => {
-    const matchup = formatMatchup(p);
-    if (p.status === 'correct') {
-      showToast(`¡Ganaste! Acertaste ${p.predicted_team?.name || 'tu equipo'} en ${matchup} (+${p.points_awarded} puntos Strike)`, 'success');
+  unseenResults.forEach((prediction) => {
+    const matchupLabel = formatMatchup(prediction);
+    if (prediction.status === 'correct') {
+      showToast(`¡Ganaste! Acertaste ${prediction.predicted_team?.name || 'tu equipo'} en ${matchupLabel} (+${prediction.points_awarded} puntos Strike)`, 'success');
     } else {
-      showToast(`Perdiste tu predicción de ${p.predicted_team?.name || ''} en ${matchup} (${p.points_awarded} puntos Strike)`, 'error');
+      showToast(`Perdiste tu predicción de ${prediction.predicted_team?.name || ''} en ${matchupLabel} (${prediction.points_awarded} puntos Strike)`, 'error');
     }
   });
 
-  api.post('/predictions/me/mark-seen', { prediction_ids: unseen.map((p) => p.id) }).catch(() => {});
+  api.post('/predictions/me/mark-seen', { prediction_ids: unseenResults.map((prediction) => prediction.id) }).catch(() => {});
 }
 
-function renderPredictionHistoryRow(p) {
-  const matchup = formatMatchup(p);
-  const game = p.game;
-  const score = game && game.status === 'final' ? `${game.away_score} - ${game.home_score}` : '';
-  const canDelete = true;
+function renderPredictionHistoryRow(prediction) {
+  const matchupLabel = formatMatchup(prediction);
+  const scheduledGame = prediction.game;
+  const finalScore = scheduledGame && scheduledGame.status === 'final' ? `${scheduledGame.away_score} - ${scheduledGame.home_score}` : '';
 
-  let pointsTag = '';
-  if (p.status === 'correct') {
-    pointsTag = `<span class="points-pill">+${p.points_awarded}</span>`;
-  } else if (p.status === 'incorrect') {
-    pointsTag = `<span class="points-pill points-pill-loss">${p.points_awarded}</span>`;
+  let pointsBadge = '';
+  if (prediction.status === 'correct') {
+    pointsBadge = `<span class="points-pill">+${prediction.points_awarded}</span>`;
+  } else if (prediction.status === 'incorrect') {
+    pointsBadge = `<span class="points-pill points-pill-loss">${prediction.points_awarded}</span>`;
   }
 
-  const statusClass = { pending: '', correct: 'prediction-correct', incorrect: 'prediction-incorrect' }[p.status] || '';
+  const rowStatusClass = { pending: '', correct: 'prediction-correct', incorrect: 'prediction-incorrect' }[prediction.status] || '';
 
   return `
-    <div class="prediction-row ${statusClass}">
+    <div class="prediction-row ${rowStatusClass}">
       <div>
-        <strong>${esc(p.predicted_team?.name || '—')}</strong>
-        <span class="stats-subtitle">${esc(matchup)} ${score ? '· ' + esc(score) : ''}</span>
+        <strong>${esc(prediction.predicted_team?.name || '—')}</strong>
+        <span class="stats-subtitle">${esc(matchupLabel)} ${finalScore ? '· ' + esc(finalScore) : ''}</span>
       </div>
       <div class="prediction-row-status">
-        ${pointsTag}
-        ${canDelete ? `<button class="prediction-delete-btn" data-prediction-id="${Number(p.id)}" aria-label="Borrar">&times;</button>` : ''}
+        ${pointsBadge}
+        <button class="prediction-delete-btn" data-prediction-id="${Number(prediction.id)}" aria-label="Borrar">&times;</button>
       </div>
     </div>`;
 }
 
-function renderPredictionsSection(title, list) {
-  if (!list.length) return '';
-  return `<h4 class="stats-section-label">${title} (${list.length})</h4>${list.map(renderPredictionHistoryRow).join('')}`;
+function renderPredictionsSection(sectionTitle, predictionList) {
+  if (!predictionList.length) return '';
+  return `<h4 class="stats-section-label">${sectionTitle} (${predictionList.length})</h4>${predictionList.map(renderPredictionHistoryRow).join('')}`;
 }
 
-function groupPredictionsByStatus(predictions) {
+function groupPredictionsByStatus(storedPredictions) {
   return {
-    pending: predictions.filter((p) => p.status === 'pending'),
-    correct: predictions.filter((p) => p.status === 'correct'),
-    incorrect: predictions.filter((p) => p.status === 'incorrect'),
+    pending: storedPredictions.filter((prediction) => prediction.status === 'pending'),
+    correct: storedPredictions.filter((prediction) => prediction.status === 'correct'),
+    incorrect: storedPredictions.filter((prediction) => prediction.status === 'incorrect'),
   };
 }
 
 async function openPredictionsModal() {
-  const backdrop = document.getElementById('predictions-modal-backdrop');
-  const listEl = document.getElementById('predictions-list');
-  if (!backdrop || !listEl) return;
+  const modalBackdrop = document.getElementById('predictions-modal-backdrop');
+  const listContainer = document.getElementById('predictions-list');
+  if (!modalBackdrop || !listContainer) return;
 
-  backdrop.classList.remove('hidden');
-  listEl.innerHTML = 'Cargando…';
+  modalBackdrop.classList.remove('hidden');
+  listContainer.innerHTML = 'Cargando…';
 
   try {
-    const predictions = await api.get('/predictions/me');
-    renderPredictionsListInto(listEl, predictions);
-  } catch (err) {
-    listEl.innerHTML = `<p class="empty-state">${esc(err.message)}</p>`;
+    const storedPredictions = await api.get('/predictions/me');
+    renderPredictionsListInto(listContainer, storedPredictions);
+  } catch (loadError) {
+    listContainer.innerHTML = `<p class="empty-state">${esc(loadError.message)}</p>`;
   }
 }
 
-function renderPredictionsListInto(listEl, predictions) {
-  if (!predictions.length) {
-    listEl.innerHTML = '<p class="empty-state">Todavía no has hecho ninguna predicción.</p>';
+function renderPredictionsListInto(listContainer, storedPredictions) {
+  if (!storedPredictions.length) {
+    listContainer.innerHTML = '<p class="empty-state">Todavía no has hecho ninguna predicción.</p>';
     return;
   }
 
-  const groups = groupPredictionsByStatus(predictions);
-  listEl.innerHTML = `
+  const groupedPredictions = groupPredictionsByStatus(storedPredictions);
+  listContainer.innerHTML = `
     <div class="predictions-summary">
-      <span>${groups.pending.length} pendientes</span>
-      <span class="prediction-correct">${groups.correct.length} ganadas</span>
-      <span class="prediction-incorrect">${groups.incorrect.length} perdidas</span>
+      <span>${groupedPredictions.pending.length} pendientes</span>
+      <span class="prediction-correct">${groupedPredictions.correct.length} ganadas</span>
+      <span class="prediction-incorrect">${groupedPredictions.incorrect.length} perdidas</span>
     </div>
-    ${renderPredictionsSection('Pendientes', groups.pending)}
-    ${renderPredictionsSection('Ganadas', groups.correct)}
-    ${renderPredictionsSection('Perdidas', groups.incorrect)}
+    ${renderPredictionsSection('Pendientes', groupedPredictions.pending)}
+    ${renderPredictionsSection('Ganadas', groupedPredictions.correct)}
+    ${renderPredictionsSection('Perdidas', groupedPredictions.incorrect)}
   `;
 
-  listEl.querySelectorAll('.prediction-delete-btn').forEach((btn) => {
-    btn.addEventListener('click', () => handleDeletePrediction(btn.dataset.predictionId, listEl));
+  listContainer.querySelectorAll('.prediction-delete-btn').forEach((deleteButton) => {
+    deleteButton.addEventListener('click', () => handleDeletePrediction(deleteButton.dataset.predictionId, listContainer));
   });
 }
 
-async function handleDeletePrediction(predictionId, listEl) {
+async function handleDeletePrediction(predictionId, listContainer) {
   try {
     await api.delete(`/predictions/${predictionId}`);
-    const predictions = await api.get('/predictions/me');
-    renderPredictionsListInto(listEl, predictions);
-  } catch (err) {
-    window.alert(err.message);
+    const storedPredictions = await api.get('/predictions/me');
+    renderPredictionsListInto(listContainer, storedPredictions);
+  } catch (deleteError) {
+    window.alert(deleteError.message);
   }
 }
 
@@ -149,8 +148,8 @@ function closePredictionsModal() {
 
 function initPredictionsModal() {
   document.getElementById('predictions-modal-close')?.addEventListener('click', closePredictionsModal);
-  document.getElementById('predictions-modal-backdrop')?.addEventListener('click', (e) => {
-    if (e.target.id === 'predictions-modal-backdrop') closePredictionsModal();
+  document.getElementById('predictions-modal-backdrop')?.addEventListener('click', (clickEvent) => {
+    if (clickEvent.target.id === 'predictions-modal-backdrop') closePredictionsModal();
   });
 }
 
