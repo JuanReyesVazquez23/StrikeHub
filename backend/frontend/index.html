@@ -1,28 +1,28 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>StrikeHub â€” BÃ©isbol MLB en vivo</title>
-  <meta name="description" content="StrikeHub: sigue la MLB en vivo. Posiciones, pitchers probables, noticias, estadÃ­sticas y predicciones.">
+  <title>StrikeHub — Béisbol MLB en vivo</title>
+  <meta name="description" content="StrikeHub: sigue la MLB en vivo. Posiciones, pitchers probables, noticias, estadísticas y predicciones.">
 
-  <!-- Ãcono para pantalla principal (Android/PWA) -->
+  <!-- Ícono para pantalla principal (Android/PWA) -->
   <link rel="manifest" href="manifest.json?v=20261018">
   <link rel="icon" type="image/svg+xml" href="assets/icons/favicon.svg?v=20261018">
   <link rel="icon" type="image/png" sizes="32x32" href="assets/icons/favicon-32.png?v=20261018">
   <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/icon-192.png?v=20261018">
-  <!-- Ãcono para pantalla principal en iPhone/iPad (iOS no usa manifest.json para esto) -->
+  <!-- Ícono para pantalla principal en iPhone/iPad (iOS no usa manifest.json para esto) -->
   <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png?v=20261018">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="StrikeHub">
   <meta name="theme-color" content="#0a0a0c">
 
-  <!-- PreconexiÃ³n temprana: las fuentes no bloquean el primer pintado -->
+  <!-- Preconexión temprana: las fuentes no bloquean el primer pintado -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 
-  <!-- Cache-busting: sube el nÃºmero ?v= en CSS/JS cada vez que cambien,
-       para que el navegador no siga usando una versiÃ³n vieja cacheada. -->
+  <!-- Cache-busting: sube el número ?v= en CSS/JS cada vez que cambien,
+       para que el navegador no siga usando una versión vieja cacheada. -->
   <link rel="stylesheet" href="dist/styles.min.css?v=20261018">
 </head>
 <body>
@@ -41,14 +41,14 @@
     </div>
   </div>
 
-  <!-- Cabecera StrikeHub: el Ãºnico lugar donde aparece el logo -->
+  <!-- Cabecera StrikeHub: el único lugar donde aparece el logo -->
   <header class="header">
     <div class="container">
       <div class="brand">
         <h1 class="brand-title">
           <img class="brand-logo" src="assets/logos/strikehub-logo.svg?v=20261018" alt="StrikeHub" width="359" height="84">
         </h1>
-        <p class="tagline" data-i18n="tagline">MLB en vivo â€” posiciones, pitchers, noticias y predicciones</p>
+        <p class="tagline" data-i18n="tagline">MLB en vivo — posiciones, pitchers, noticias y predicciones</p>
       </div>
     </div>
   </header>
@@ -58,15 +58,15 @@
     <div class="live-ticker-track" id="ticker-track"></div>
   </div>
 
-  <!-- NavegaciÃ³n por vistas: cada botÃ³n muestra una secciÃ³n (carga diferida) -->
+  <!-- Navegación por vistas: cada botón muestra una sección (carga diferida) -->
   <nav class="view-nav container" aria-label="Secciones">
     <button class="view-tab active" data-view="live" data-i18n="views.live">En vivo</button>
     <button class="view-tab" data-view="calendar" data-i18n="views.calendar">Calendario</button>
     <button class="view-tab" data-view="standings" data-i18n="views.standings">Posiciones</button>
     <button class="view-tab" data-view="postseason" data-i18n="views.postseason">Postemporada</button>
-    <button class="view-tab" data-view="leaders" data-i18n="views.leaders">LÃ­deres</button>
+    <button class="view-tab" data-view="leaders" data-i18n="views.leaders">Líderes</button>
     <button class="view-tab" data-view="news" data-i18n="views.news">Noticias</button>
-    <button class="view-tab" data-view="stats" data-i18n="views.stats">EstadÃ­sticas</button>
+    <button class="view-tab" data-view="stats" data-i18n="views.stats">Estadísticas</button>
   </nav>
 
   <main class="container">
@@ -80,10 +80,10 @@
       <div id="live-container"></div>
     </section>
 
-    <!-- Calendario: bÃºsqueda por fecha + prÃ³ximos para predecir -->
+    <!-- Calendario: búsqueda por fecha + próximos para predecir -->
     <section class="section hidden" id="calendar-section" data-view-section="calendar">
       <h2 class="section-title">
-        <span data-i18n="sections.upcoming">PrÃ³ximos Partidos</span>
+        <span data-i18n="sections.upcoming">Próximos Partidos</span>
       </h2>
       <div class="date-search-row">
         <label for="games-date-input" data-i18n="game.searchByDate">Buscar por fecha:</label>
@@ -93,7 +93,7 @@
       <div id="calendar-container"></div>
     </section>
 
-    <!-- 02 â€” Posiciones -->
+    <!-- 02 — Posiciones -->
     <section class="section hidden" id="standings-section" data-view-section="standings">
       <h2 class="section-title" data-i18n="sections.standings">Posiciones</h2>
       <div id="standings-container"></div>
@@ -105,11 +105,11 @@
       <div id="postseason-container"></div>
     </section>
 
-    <!-- 03 â€” EstadÃ­sticas -->
+    <!-- 03 — Estadísticas -->
     <section class="section hidden" id="stats-section" data-view-section="stats">
-      <h2 class="section-title" data-i18n="sections.stats">EstadÃ­sticas</h2>
+      <h2 class="section-title" data-i18n="sections.stats">Estadísticas</h2>
       <div class="stats-search">
-        <select id="stats-type" aria-label="Tipo de estadÃ­stica">
+        <select id="stats-type" aria-label="Tipo de estadística">
           <option value="team" data-i18n="stats.searchTeam">Buscar equipo</option>
           <option value="player" data-i18n="stats.searchPlayer">Buscar jugador</option>
         </select>
@@ -131,13 +131,13 @@
       <div class="stats-result" id="stats-result"></div>
     </section>
 
-    <!-- LÃ­deres de la temporada (contenido de offseason) -->
+    <!-- Líderes de la temporada (contenido de offseason) -->
     <section class="section hidden" id="leaders-section" data-view-section="leaders">
-      <h2 class="section-title" data-i18n="sections.leaders">LÃ­deres</h2>
+      <h2 class="section-title" data-i18n="sections.leaders">Líderes</h2>
       <div id="leaders-container"></div>
     </section>
 
-    <!-- 04 â€” Contenido secundario: noticias + jugadores de hoy -->
+    <!-- 04 — Contenido secundario: noticias + jugadores de hoy -->
     <section class="section hidden" id="news-section" data-view-section="news">
       <div class="split-layout">
         <div class="split-main">
@@ -154,17 +154,17 @@
   </main>
 
   <footer class="footer container" id="app-footer">
-    <span><span class="bfb-word">StrikeHub</span> â€” datos reales vÃ­a MLB Stats API y ESPN.</span>
-    <span>Â© 2026</span>
+    <span><span class="bfb-word">StrikeHub</span> — datos reales vía MLB Stats API y ESPN.</span>
+    <span>© 2026</span>
   </footer>
 
-  <!-- Panel de administraciÃ³n: oculto por defecto. Se muestra con 5 taps en
-       el footer (sin popup). Solo es realmente Ãºtil si ya iniciaste sesiÃ³n
-       con una cuenta admin â€” para cualquier otro usuario, el borrado
+  <!-- Panel de administración: oculto por defecto. Se muestra con 5 taps en
+       el footer (sin popup). Solo es realmente útil si ya iniciaste sesión
+       con una cuenta admin — para cualquier otro usuario, el borrado
        responde 403 sin importar que vea esta caja. -->
   <div class="container hidden" id="admin-panel">
-    <h3>Panel de administraciÃ³n</h3>
-    <p class="stats-subtitle">Borra equipos incorrectos de la base de datos. Esta acciÃ³n no se puede deshacer.</p>
+    <h3>Panel de administración</h3>
+    <p class="stats-subtitle">Borra equipos incorrectos de la base de datos. Esta acción no se puede deshacer.</p>
     <div class="admin-controls">
       <select id="admin-league-select"></select>
       <button class="btn btn-outline btn-small" id="admin-load-btn">Cargar equipos</button>
@@ -173,15 +173,15 @@
     <div id="admin-excluded-list"></div>
 
     <h3 class="admin-subtitle">Ligas completas</h3>
-    <p class="stats-subtitle">Borra una liga entera (Ãºtil para un evento ya pasado, ej. un Mundial anterior). Se puede reactivar despuÃ©s.</p>
+    <p class="stats-subtitle">Borra una liga entera (útil para un evento ya pasado, ej. un Mundial anterior). Se puede reactivar después.</p>
     <div id="admin-leagues-list"></div>
   </div>
 
-  <!-- Modal de autenticaciÃ³n -->
+  <!-- Modal de autenticación -->
   <div class="modal-backdrop hidden" id="auth-modal-backdrop">
     <div class="modal">
       <button class="modal-close" id="auth-modal-close" aria-label="Cerrar">&times;</button>
-      <h2 id="auth-title">Iniciar sesiÃ³n</h2>
+      <h2 id="auth-title">Iniciar sesión</h2>
       <p class="modal-sub">StrikeHub</p>
       <form id="auth-form" data-mode="login">
         <div class="field">
@@ -189,21 +189,21 @@
           <input type="text" id="auth-username" required minlength="3" maxlength="20" autocomplete="username">
         </div>
         <div class="field hidden" id="email-field">
-          <label data-i18n="auth.email">Correo electrÃ³nico</label>
+          <label data-i18n="auth.email">Correo electrónico</label>
           <input type="email" id="auth-email" autocomplete="email">
         </div>
         <div class="field">
-          <label data-i18n="auth.password">ContraseÃ±a</label>
+          <label data-i18n="auth.password">Contraseña</label>
           <input type="password" id="auth-password" required minlength="8" maxlength="72" autocomplete="current-password">
         </div>
         <p class="form-error" id="auth-error"></p>
         <div class="modal-actions">
-          <button type="submit" class="btn btn-primary" id="auth-submit-btn">Iniciar sesiÃ³n</button>
+          <button type="submit" class="btn btn-primary" id="auth-submit-btn">Iniciar sesión</button>
         </div>
       </form>
       <p class="modal-switch">
-        <span id="auth-switch-text">Â¿No tienes cuenta?</span>
-        <button id="auth-switch-btn" type="button">RegÃ­strate</button>
+        <span id="auth-switch-text">¿No tienes cuenta?</span>
+        <button id="auth-switch-btn" type="button">Regístrate</button>
       </p>
     </div>
   </div>
@@ -214,20 +214,20 @@
       <button class="modal-close" id="predictions-modal-close" aria-label="Cerrar">&times;</button>
       <h2>Mis predicciones</h2>
       <p class="modal-sub">StrikeHub</p>
-      <div id="predictions-list">Cargandoâ€¦</div>
+      <div id="predictions-list">Cargando…</div>
     </div>
   </div>
 
-  <!-- Notificaciones flotantes (ej. "ganaste tu predicciÃ³n") -->
+  <!-- Notificaciones flotantes (ej. "ganaste tu predicción") -->
   <div id="toast-container" aria-live="polite"></div>
 
-  <!-- BotÃ³n discreto para agregar a la pantalla principal (solo aparece si el navegador lo permite) -->
+  <!-- Botón discreto para agregar a la pantalla principal (solo aparece si el navegador lo permite) -->
   <div class="install-app-banner hidden" id="install-app-banner">
     <button id="install-app-btn" class="install-app-action">Instalar app</button>
     <button id="install-app-dismiss" class="install-app-dismiss" aria-label="Cerrar">&times;</button>
   </div>
 
-  <!-- Bundle Ãºnico minificado (generado con esbuild desde js/*.js, mismo
+  <!-- Bundle único minificado (generado con esbuild desde js/*.js, mismo
        orden): 1 request en vez de 9. Ver frontend/dist/README. -->
   <script src="dist/app.bundle.min.js?v=20261018"></script>
 </body>

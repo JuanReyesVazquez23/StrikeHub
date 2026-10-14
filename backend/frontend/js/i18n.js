@@ -1,7 +1,7 @@
-﻿/**
- * InternacionalizaciÃ³n simple basada en diccionarios JSON (es/en).
+/**
+ * Internacionalización simple basada en diccionarios JSON (es/en).
  * El idioma elegido se guarda en localStorage (dato no sensible: solo una
- * preferencia de interfaz) y, si el usuario tiene sesiÃ³n iniciada, tambiÃ©n
+ * preferencia de interfaz) y, si el usuario tiene sesión iniciada, también
  * se sincroniza con su perfil en el backend.
  */
 const i18nState = {
@@ -28,8 +28,8 @@ function t(key) {
 function applyTranslations() {
   document.querySelectorAll('[data-i18n]').forEach((element) => {
     const translatedText = t(element.dataset.i18n);
-    // Si una versiÃ³n anterior del diccionario sigue en cachÃ©, conserva el
-    // texto escrito en HTML en lugar de mostrar la clave tÃ©cnica (ej. header.kicker).
+    // Si una versión anterior del diccionario sigue en caché, conserva el
+    // texto escrito en HTML en lugar de mostrar la clave técnica (ej. header.kicker).
     if (translatedText !== element.dataset.i18n) element.textContent = translatedText;
   });
   document.querySelectorAll('[data-i18n-placeholder]').forEach((element) => {
@@ -45,7 +45,7 @@ async function setLanguage(lang) {
   i18nState.messages = await loadDictionary(lang);
   applyTranslations();
 
-  // Si hay sesiÃ³n activa, guarda la preferencia en el backend tambiÃ©n.
+  // Si hay sesión activa, guarda la preferencia en el backend también.
   if (window.currentUser) {
     api.patch('/auth/me/language', { preferred_language: lang }).catch(() => {});
   }
