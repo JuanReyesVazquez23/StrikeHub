@@ -14,7 +14,7 @@ from datetime import date
 import httpx
 
 from app.core.config import settings
-from app.services.http_client import DEFAULT_HTTP_HTTP_TIMEOUT as HTTP_HTTP_TIMEOUT
+from app.services.http_client import DEFAULT_HTTP_TIMEOUT as HTTP_TIMEOUT
 
 MLB_SPORT_ID = 1  # id interno de MLB en statsapi.mlb.com (Grandes Ligas)
 
