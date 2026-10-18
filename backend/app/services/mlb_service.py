@@ -56,12 +56,19 @@ class StatsApiLeagueConfig:
     - division_names: mapa id de división -> nombre. Vacío si la liga no usa
       divisiones (LIDOM: un solo grupo).
     - filter_by_league: si True, /schedule y /teams se filtran por league_ids.
+    - sync_full_season_schedule: si True, además de la ventana cercana
+      (ayer/hoy/mañana) la sincronización pide el calendario COMPLETO de la
+      temporada en una sola petición. Se activa en ligas de temporada corta
+      (LIDOM: ~150 juegos en 10 semanas) para que la vista de Calendario pueda
+      mostrar cualquier fecha, no solo los días cercanos. En MLB no se activa:
+      su temporada pasa de 2400 juegos.
     """
 
     sport_id: int
     league_ids: tuple[int, ...]
     division_names: dict[int, str] = field(default_factory=dict)
     filter_by_league: bool = False
+    sync_full_season_schedule: bool = False
 
     @property
     def league_ids_csv(self) -> str:
@@ -76,10 +83,12 @@ MLB_API_CONFIG = StatsApiLeagueConfig(
 )
 
 # LIDOM: liga invernal dominicana (leagueId=131 dentro del sportId=17).
+# Temporada corta y de calendario fijo, así que se sincroniza completa.
 LIDOM_API_CONFIG = StatsApiLeagueConfig(
     sport_id=17,
     league_ids=(131,),
     filter_by_league=True,
+    sync_full_season_schedule=True,
 )
 
 # Mapa clave de liga (tal como se guarda en la BD) -> configuración de la API.
@@ -103,15 +112,20 @@ async def get_standings(season: int, api_config: StatsApiLeagueConfig = MLB_API_
         return response.json()
 
 
-async def get_schedule(game_date: date, api_config: StatsApiLeagueConfig = MLB_API_CONFIG) -> dict:
+async def get_schedule_range(
+    start_date: date, end_date: date, api_config: StatsApiLeagueConfig = MLB_API_CONFIG
+) -> dict:
     """
-    Calendario/resultados del día indicado. Incluye pitchers probables y,
-    si el juego ya inició/terminó, el linescore básico.
+    Calendario/resultados de un RANGO de fechas (las dos incluidas). La API
+    devuelve todos los días y juegos del rango en una sola petición, así que
+    sirve para traer la temporada completa de una liga corta (LIDOM: ~150
+    juegos) de golpe, en vez de una petición por día.
     """
     endpoint_url = f"{settings.MLB_STATS_API_BASE}/schedule"
     query_params = {
         "sportId": api_config.sport_id,
-        "date": game_date.isoformat(),
+        "startDate": start_date.isoformat(),
+        "endDate": end_date.isoformat(),
         "hydrate": "team,linescore,probablePitcher,decisions",
     }
     if api_config.filter_by_league:
@@ -120,6 +134,14 @@ async def get_schedule(game_date: date, api_config: StatsApiLeagueConfig = MLB_A
         response = await client.get(endpoint_url, params=query_params)
         response.raise_for_status()
         return response.json()
+
+
+async def get_schedule(game_date: date, api_config: StatsApiLeagueConfig = MLB_API_CONFIG) -> dict:
+    """
+    Calendario/resultados del día indicado. Incluye pitchers probables y,
+    si el juego ya inició/terminó, el linescore básico.
+    """
+    return await get_schedule_range(game_date, game_date, api_config)
 
 
 async def get_live_feed(mlb_game_id: int) -> dict:

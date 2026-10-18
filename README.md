@@ -34,7 +34,7 @@ https://strikehub.onrender.com (Render Free Plan)
 
 - ⚾ Marcadores de **MLB y LIDOM** en vivo (diamante, conteo, última jugada)
 - 🔀 Selector de liga (MLB / LIDOM): cambia todas las vistas
-- 📅 Calendario y resultados con búsqueda por fecha
+- 📅 Calendario y resultados con búsqueda por fecha (en la LIDOM, la temporada completa)
 - 📊 Posiciones y estadísticas reales de bateo/pitcheo
 - 🏆 Postemporada de MLB: cuadro en vivo (Wild Card → Serie Mundial) con sembrados, victorias por serie y campeón
 - 🎯 Predicciones con puntos Strike, historial y avisos de ganaste/perdiste
@@ -124,7 +124,7 @@ Made by Juan Reyes
 | Historial de predicciones + aviso de ganaste/perdiste | ✅ Completo |
 | Favoritos (equipo) | ✅ Completo |
 | **MLB** — posiciones, pitchers hoy, en vivo, resultados, estadísticas reales | ✅ Funcional de extremo a extremo (MLB Stats API, gratuita, sin key) |
-| **LIDOM** — posiciones, en vivo, resultados, estadísticas reales (selector de liga) | ✅ Funcional de extremo a extremo (misma MLB Stats API, `sportId=17`) |
+| **LIDOM** — posiciones, en vivo, resultados, calendario completo de la temporada, estadísticas reales (selector de liga) | ✅ Funcional de extremo a extremo (misma MLB Stats API, `sportId=17`) |
 | Noticias (ESPN para la MLB; prensa dominicana para la LIDOM) | ✅ Funcional |
 | Panel de administración (MLB y LIDOM) | ✅ Completo |
 | PWA / "instalar app" | ✅ Básico |

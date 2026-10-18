@@ -505,8 +505,11 @@ async function renderCalendarSection(leagueKey, specificDate = null) {
   const calendarContainer = document.getElementById('calendar-container');
   calendarContainer.innerHTML = `<p class="empty-state">${t('common.loading')}</p>`;
   try {
-    const { visibleGames, isHistoricalSearch } = await fetchDisplayGames(leagueKey, specificDate);
-    if (!isHistoricalSearch) renderTicker(visibleGames);
+    const { visibleGames } = await fetchDisplayGames(leagueKey, specificDate);
+    // El ticker de la parte de arriba muestra los partidos de AHORA: si se
+    // está buscando una fecha suelta (ej. el 20 de octubre), no se toca, porque
+    // esos partidos no son los de hoy.
+    if (!specificDate) renderTicker(visibleGames);
 
     if (!visibleGames.length) {
       calendarContainer.innerHTML = `<p class="empty-state">${t('common.noGamesToday')}</p>`;

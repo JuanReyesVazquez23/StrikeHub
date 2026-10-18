@@ -37,6 +37,13 @@ logger = logging.getLogger("bfb.sync")
 
 CURRENT_SEASON = datetime.now(timezone.utc).year
 
+# Con el calendario completo ya guardado, una liga de temporada corta como la
+# LIDOM tiene siempre decenas de partidos futuros en BD. Si quedan menos que
+# esto (temporada recién cargada, o ya casi terminando), vale la pena volver a
+# pedir la temporada completa; si no, no se descarga la misma lista en cada
+# ciclo de sincronización.
+FULL_SCHEDULE_MIN_UPCOMING_GAMES = 15
+
 
 def _get_or_create_sport(db: Session, sport_key: str, spanish_name: str, english_name: str) -> Sport:
     sport = db.query(Sport).filter(Sport.key == sport_key).first()
@@ -184,6 +191,21 @@ def _extract_team_runs(schedule_game: dict, team_side: str) -> int | None:
     return schedule_game.get("teams", {}).get(team_side, {}).get("score")
 
 
+def season_schedule_window(reference_date: date) -> tuple[date, date]:
+    """
+    Rango de fechas de la temporada que cruza dos años (la LIDOM va de octubre
+    a enero). De septiembre en adelante es la temporada que empieza ese mismo
+    año; de enero a agosto, la que empezó el año anterior — así el rango se
+    ajusta solo cada temporada, sin fechas escritas a mano.
+
+    Ojo: de marzo a agosto ese rango cae en el pasado (la temporada ya
+    terminó), y quien llama debe notarlo comparando con la fecha de
+    referencia antes de pedir nada.
+    """
+    season_start_year = reference_date.year if reference_date.month >= 9 else reference_date.year - 1
+    return date(season_start_year, 9, 1), date(season_start_year + 1, 2, 28)
+
+
 async def sync_league_games(league_key: str, api_config: StatsApiLeagueConfig, target_date: date | None = None) -> None:
     db = SessionLocal()
     try:
@@ -215,6 +237,36 @@ async def sync_league_games(league_key: str, api_config: StatsApiLeagueConfig, t
         for sync_date in sorted(dates_to_sync):
             daily_schedule = await mlb_service.get_schedule(sync_date, api_config)
             _upsert_games_from_schedule(db, league, daily_schedule)
+
+        if api_config.sync_full_season_schedule:
+            season_start_date, season_end_date = season_schedule_window(reference_date)
+            # De marzo a agosto (temporada muerta en la LIDOM) el rango cae en
+            # el pasado y no hay nada nuevo que traer.
+            if season_start_date <= reference_date <= season_end_date:
+                # La temporada completa se pide solo si el calendario guardado
+                # se está quedando sin partidos futuros: con la temporada ya
+                # cargada hay decenas de juegos por delante, así que esto corre
+                # una vez por temporada (y otra vez al final, para recoger la
+                # postemporada) en vez de descargar la misma lista en cada ciclo.
+                near_window_end = datetime.combine(
+                    reference_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
+                )
+                upcoming_game_count = (
+                    db.query(Game)
+                    .filter(Game.league_id == league.id, Game.start_time > near_window_end)
+                    .count()
+                )
+                if upcoming_game_count < FULL_SCHEDULE_MIN_UPCOMING_GAMES:
+                    full_season_schedule = await mlb_service.get_schedule_range(
+                        season_start_date, season_end_date, api_config
+                    )
+                    _upsert_games_from_schedule(db, league, full_season_schedule)
+                    logger.info(
+                        "Calendario completo de '%s' sincronizado (%s a %s).",
+                        league.key,
+                        season_start_date.isoformat(),
+                        season_end_date.isoformat(),
+                    )
 
         db.commit()
         logger.info("Calendario de '%s' sincronizado (%d fecha(s)).", league.key, len(dates_to_sync))
@@ -266,6 +318,13 @@ def _upsert_games_from_schedule(db, league, daily_schedule: dict) -> None:
                     start_time=datetime.fromisoformat(schedule_game["gameDate"].replace("Z", "+00:00")),
                 )
                 db.add(game)
+                # La sesión se crea con autoflush=False: sin este flush, un
+                # juego recién agregado no se ve en las consultas siguientes, y
+                # un mismo partido que llegue dos veces en la misma corrida
+                # (ej. en la ventana cercana y en el calendario completo de la
+                # temporada) se intentaría insertar dos veces y reventaría la
+                # restricción única de (liga, id externo).
+                db.flush()
 
             raw_status = schedule_game.get("status", {}).get("abstractGameState", "Preview")
             status_mapping = {"Preview": "scheduled", "Live": "live", "Final": "final"}
