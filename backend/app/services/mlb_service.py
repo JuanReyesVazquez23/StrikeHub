@@ -25,6 +25,7 @@ import httpx
 
 from app.core.config import settings
 from app.services.http_client import DEFAULT_HTTP_TIMEOUT as HTTP_TIMEOUT
+from app.services.play_description import describe_play_in_spanish
 
 MLB_SPORT_ID = 1  # id interno de MLB en statsapi.mlb.com (Grandes Ligas)
 
@@ -196,6 +197,24 @@ async def get_stat_leaders(season: int, category: str, limit: int = 5) -> dict:
         return response.json()
 
 
+def _find_last_completed_play(live_feed: dict) -> dict | None:
+    """
+    Última jugada TERMINADA del partido: la que el marcador muestra como
+    "última jugada".
+
+    Ojo: no sirve currentPlay.result.description — durante el turno en curso
+    esa descripción viene vacía o con un evento de relleno ("Batter Timeout.",
+    "Mound Visit."), mientras que la jugada de verdad está en allPlays.
+    """
+    plays = (live_feed.get("liveData", {}).get("plays", {}) or {}).get("allPlays") or []
+    for play in reversed(plays):
+        if play.get("about", {}).get("isComplete") is False:
+            continue
+        if (play.get("result", {}).get("description") or "").strip():
+            return play
+    return None
+
+
 def extract_live_situation(live_feed: dict) -> dict:
     """
     Extrae la situación de juego en vivo (bases, outs, bateador, pitcher,
@@ -205,11 +224,15 @@ def extract_live_situation(live_feed: dict) -> dict:
     Las bases solo aparecen como clave en el JSON cuando están ocupadas
     (no vienen como null/false); por eso se detecta con bool(...) sobre la
     presencia de la clave, no comparando un valor.
+
+    Devuelve la última jugada dos veces: "last_play" tal como la redacta la
+    API (inglés) y "last_play_es" armada en español desde el evento
+    estructurado. Quien responde al frontend elige según el idioma pedido.
     """
     linescore_data = live_feed.get("liveData", {}).get("linescore", {})
     offense = linescore_data.get("offense", {})
     defense = linescore_data.get("defense", {})
-    current_play = live_feed.get("liveData", {}).get("plays", {}).get("currentPlay", {})
+    last_play = _find_last_completed_play(live_feed)
 
     return {
         "inning": linescore_data.get("currentInning"),
@@ -224,7 +247,8 @@ def extract_live_situation(live_feed: dict) -> dict:
         },
         "batter": offense.get("batter", {}).get("fullName"),
         "pitcher": defense.get("pitcher", {}).get("fullName"),
-        "last_play": current_play.get("result", {}).get("description"),
+        "last_play": (last_play or {}).get("result", {}).get("description") or None,
+        "last_play_es": describe_play_in_spanish(last_play),
     }
 
 

@@ -7,7 +7,7 @@ from app.api.deps import get_db
 from app.core.rate_limit import enforce_rate_limit
 from app.models.sport import Game, League, Team
 from app.schemas.sport import GameDetailOut, GameOut
-from app.services import mlb_service, translation_service
+from app.services import mlb_service
 
 router = APIRouter(tags=["games"])
 
@@ -105,9 +105,9 @@ async def get_game_live_situation(
     segundos y mostrar algo realmente "al momento" mientras el usuario ve
     el partido.
 
-    lang: si es "es", la descripción de "última jugada" se traduce al
-    momento (cambia en cada jugada, así que no tiene sentido guardarla
-    traducida). Nombres de jugadores nunca se traducen.
+    lang: si es "es", la "última jugada" se arma en español desde el evento
+    estructurado del feed (cambia en cada jugada, así que no tiene sentido
+    guardarla en la base de datos). Nombres de jugadores nunca se traducen.
     """
     target_game = db.query(Game).options(joinedload(Game.league)).filter(Game.id == game_id).first()
     if not target_game:
@@ -134,9 +134,11 @@ async def get_game_live_situation(
         )
 
     situation_payload = mlb_service.extract_live_situation(live_feed)
-    if lang == "es" and situation_payload.get("last_play"):
-        situation_payload["last_play"] = translation_service.translate_to_spanish(situation_payload["last_play"]) or situation_payload[
-            "last_play"
-        ]
+    # La jugada en español se arma en el backend con el evento estructurado:
+    # pasarla por un traductor automático la destrozaba ("Lake aterriza" en vez
+    # de "Lake batea para out") y además rompía los nombres propios.
+    spanish_last_play = situation_payload.pop("last_play_es", None)
+    if lang == "es" and spanish_last_play:
+        situation_payload["last_play"] = spanish_last_play
 
     return {"status": target_game.status, "situation": situation_payload}
