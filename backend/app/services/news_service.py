@@ -58,6 +58,36 @@ def _normalize_for_match(text_value: str) -> str:
     return "".join(character for character in decomposed if not unicodedata.combining(character)).lower()
 
 
+# Fin de oración: un punto, signo de exclamación o de interrogación seguido de
+# un espacio (o del final del texto). El lookahead descarta los puntos de
+# decimales ("11.5") y el lookbehind los de abreviaturas ("EE.UU.").
+_SENTENCE_END_PATTERN = re.compile(r"(?<![A-ZÁÉÍÓÚÑ])[.!?](?=\s|$)")
+# Los feeds dejan un espacio antes de la puntuación cuando venía de una
+# etiqueta HTML ("...la victoria ."); se limpia al recortar.
+_SPACE_BEFORE_PUNCTUATION_PATTERN = re.compile(r"\s+([.!?,;:])")
+# Si el primer fin de oración cae antes de este largo, se asume que es una
+# abreviatura ("Dr. Pérez...") y se sigue buscando el siguiente.
+MIN_SUMMARY_SENTENCE_LENGTH = 30
+
+
+def _summarize_first_sentence(summary: str | None) -> str | None:
+    """
+    Recorta el resumen a su primera oración (hasta el primer punto incluido).
+
+    Los feeds de prensa local traen resúmenes muy largos que hacen las
+    tarjetas eternas, así que solo se guarda la primera oración.
+    """
+    if not summary:
+        return summary
+
+    for sentence_end in _SENTENCE_END_PATTERN.finditer(summary):
+        if sentence_end.end() >= MIN_SUMMARY_SENTENCE_LENGTH:
+            first_sentence = summary[: sentence_end.end()]
+            return _SPACE_BEFORE_PUNCTUATION_PATTERN.sub(r"\1", first_sentence).strip()
+
+    return summary.strip()
+
+
 def _extract_article_image(feed_entry: dict) -> str | None:
     """
     Busca la imagen real del artículo, probando las distintas formas en que
@@ -148,6 +178,8 @@ async def fetch_league_news(league_key: str, team_name_hints: list[str], limit: 
 
     team_name_hints: nombres y apodos de los equipos de la liga, tal como
     están en la BD (se comparan sin acentos ni mayúsculas).
+
+    El resumen se recorta a su primera oración (ver _summarize_first_sentence).
     """
     feed = FEEDS_BY_LEAGUE.get(league_key)
     if not feed:
@@ -172,4 +204,11 @@ async def fetch_league_news(league_key: str, team_name_hints: list[str], limit: 
         mentions_team = any(hint in title_text for hint in normalized_hints)
         if mentions_league or mentions_team:
             relevant_articles.append(feed_article)
+
+    # La prensa local escribe resúmenes de varios párrafos: se recorta a la
+    # primera oración para que las tarjetas no queden enormes. (Al feed de ESPN
+    # no se le aplica: sus términos de uso piden mostrar el contenido tal cual.)
+    for feed_article in relevant_articles:
+        feed_article["summary"] = _summarize_first_sentence(feed_article["summary"])
+
     return relevant_articles[:limit]
