@@ -8,7 +8,7 @@
  * peticiones al backend responden 403. No hay una segunda contraseña; se
  * reutiliza la sesión que ya existe para favoritos/predicciones.
  */
-const ADMIN_LEAGUE_KEYS = ['mlb'];
+const ADMIN_LEAGUE_KEYS = ['mlb', 'lidom'];
 
 let footerTapCount = 0;
 let footerTapResetTimer = null;

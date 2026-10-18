@@ -25,6 +25,7 @@ from app.services import (
     news_service,
     translation_service,
 )
+from app.services.mlb_service import LEAGUE_API_CONFIGS, StatsApiLeagueConfig
 from app.services.probability_service import (
     estimate_home_win_probability,
     points_for_prediction,
@@ -33,7 +34,7 @@ from app.services.probability_service import (
 
 logger = logging.getLogger("bfb.sync")
 
-CURRENT_MLB_SEASON = datetime.now(timezone.utc).year
+CURRENT_SEASON = datetime.now(timezone.utc).year
 
 
 def _get_or_create_sport(db: Session, sport_key: str, spanish_name: str, english_name: str) -> Sport:
@@ -65,29 +66,39 @@ def _get_or_create_league(db: Session, sport: Sport, league_key: str, league_nam
 
 
 def ensure_base_catalog(db: Session) -> None:
-    """Crea el deporte (solo béisbol) y la liga MLB si todavía no existen (idempotente)."""
+    """
+    Crea el deporte (solo béisbol) y las ligas soportadas si todavía no
+    existen (idempotente): MLB (temporada regular) y LIDOM (liga invernal
+    dominicana). Ambas se sirven desde la misma MLB Stats API.
+    """
     baseball = _get_or_create_sport(db, "baseball", "Béisbol", "Baseball")
 
     _get_or_create_league(db, baseball, "mlb", "MLB", provider="mlb_stats_api", is_primary=True)
+    _get_or_create_league(db, baseball, "lidom", "LIDOM", provider="mlb_stats_api")
 
 
-async def sync_mlb_teams_and_standings() -> None:
+async def sync_league_teams_and_standings(league_key: str, api_config: StatsApiLeagueConfig) -> None:
+    """
+    Sincroniza los equipos y las posiciones de una liga. Funciona igual para
+    la MLB (divisiones AL/NL) y para la LIDOM (un solo grupo, sin divisiones):
+    la única diferencia la aporta api_config.
+    """
     db = SessionLocal()
     try:
-        league = db.query(League).filter(League.key == "mlb").first()
+        league = db.query(League).filter(League.key == league_key).first()
         if not league:
-            logger.warning("Liga MLB no existe todavía en la BD; ejecuta ensure_base_catalog primero.")
+            logger.warning("Liga '%s' no existe todavía en la BD; ejecuta ensure_base_catalog primero.", league_key)
             return
         if not league.sync_enabled:
             logger.info("Liga '%s' desactivada desde el panel de admin; se omite su sincronización.", league.key)
             return
 
-        standings_response = await mlb_service.get_standings(CURRENT_MLB_SEASON)
+        standings_response = await mlb_service.get_standings(CURRENT_SEASON, api_config)
 
-        # El endpoint de standings solo trae "name" (nombre completo, ej.
-        # "New York Yankees"). Para el nombre corto ("Yankees"), la
-        # abreviación ("NYY") y la ciudad, se necesita el endpoint /teams.
-        teams_response = await mlb_service.get_teams(CURRENT_MLB_SEASON)
+        # El endpoint de standings trae el nombre completo, pero para el
+        # nombre corto ("Yankees"/"Licey"), la abreviación ("NYY"/"LIC") y la
+        # ciudad se necesita el endpoint /teams.
+        teams_response = await mlb_service.get_teams(CURRENT_SEASON, api_config)
         team_details_by_external_id = {str(team_payload["id"]): team_payload for team_payload in teams_response.get("teams", [])}
 
         valid_external_ids: set[str] = set()
@@ -96,7 +107,7 @@ async def sync_mlb_teams_and_standings() -> None:
         }
         for division_record in standings_response.get("records", []):
             division_id = division_record.get("division", {}).get("id")
-            division_name = mlb_service.MLB_DIVISION_NAMES.get(division_id)
+            division_name = api_config.division_names.get(division_id)
 
             for team_standing in division_record.get("teamRecords", []):
                 standing_team_info = team_standing["team"]
@@ -105,6 +116,9 @@ async def sync_mlb_teams_and_standings() -> None:
                     continue  # borrado a mano por el panel de admin; nunca se recrea
                 valid_external_ids.add(external_id)
                 team_details = team_details_by_external_id.get(external_id, {})
+                # Se prefiere el nombre completo desde /teams ("Estrellas
+                # Orientales"); el de /standings puede venir corto ("Estrellas").
+                full_name = team_details.get("name") or standing_team_info["name"]
 
                 team = (
                     db.query(Team)
@@ -112,18 +126,19 @@ async def sync_mlb_teams_and_standings() -> None:
                     .first()
                 )
                 if not team:
-                    team = Team(league_id=league.id, external_id=external_id, name=standing_team_info["name"])
+                    team = Team(league_id=league.id, external_id=external_id, name=full_name)
                     db.add(team)
 
                 wins = team_standing.get("wins", 0)
                 losses = team_standing.get("losses", 0)
                 games_played = wins + losses
-                team.name = standing_team_info["name"]
-                team.short_name = team_details.get("teamName")  # ej. "Yankees"
-                team.abbreviation = team_details.get("abbreviation")  # ej. "NYY"
-                team.city = team_details.get("locationName")  # ej. "New York"
-                # Logo oficial de MLB: patrón de CDN público y estable, confirmado
-                # contra datos reales usados por la propia comunidad de MLB.
+                team.name = full_name
+                team.short_name = team_details.get("teamName")  # ej. "Yankees" / "Licey"
+                team.abbreviation = team_details.get("abbreviation")  # ej. "NYY" / "LIC"
+                team.city = team_details.get("locationName")  # ej. "New York" / "Santo Domingo"
+                # Logo oficial: patrón de CDN público y estable, confirmado
+                # contra datos reales. Sirve igual para la LIDOM (sus equipos
+                # usan el mismo CDN, ej. https://www.mlbstatic.com/team-logos/672.svg).
                 team.logo_url = f"https://www.mlbstatic.com/team-logos/{external_id}.svg"
                 team.wins = wins
                 team.losses = losses
@@ -132,28 +147,28 @@ async def sync_mlb_teams_and_standings() -> None:
                 team.is_placeholder = False
                 team.standings_updated_at = datetime.now(timezone.utc)
 
-        # Limpieza: cualquier equipo de MLB en la BD que NO sea una de las 30
-        # franquicias reales de esta tabla de posiciones se elimina (ej. los
-        # "equipos" American League / National League del Juego de Estrellas
-        # que hayan quedado guardados de una sincronización anterior a este
-        # arreglo — is_placeholder ya no alcanza por sí solo si esos registros
-        # se crearon antes de que existiera esa bandera).
+        # Limpieza: cualquier equipo de esta liga en la BD que la API ya NO
+        # devuelva se elimina (ej. los "equipos" American League/"National
+        # League" del Juego de Estrellas de MLB — is_placeholder ya no alcanza
+        # por sí solo si esos registros se crearon antes de que existiera esa
+        # bandera — o equipos de otra liga invernal guardados por error).
         pruned_team_count = _prune_stale_teams(db, league, valid_external_ids)
         if pruned_team_count:
             logger.info(
-                "Se eliminaron %d equipo(s) de 'mlb' que no son franquicias reales (ej. Juego de Estrellas).",
+                "Se eliminaron %d equipo(s) de '%s' que no son franquicias reales.",
                 pruned_team_count,
+                league.key,
             )
 
         db.commit()
-        logger.info("Posiciones de MLB sincronizadas correctamente.")
+        logger.info("Posiciones de '%s' sincronizadas correctamente.", league.key)
     finally:
         db.close()
 
 
 def _extract_team_runs(schedule_game: dict, team_side: str) -> int | None:
     """
-    Extrae el marcador real de un lado ("home" o "away") de un juego de MLB.
+    Extrae el marcador real de un lado ("home" o "away") de un juego.
 
     Se prioriza linescore.teams.{side}.runs, confirmado como la fuente que
     sí se actualiza mientras el partido está EN VIVO. teams.{side}.score
@@ -168,10 +183,10 @@ def _extract_team_runs(schedule_game: dict, team_side: str) -> int | None:
     return schedule_game.get("teams", {}).get(team_side, {}).get("score")
 
 
-async def sync_mlb_games(target_date: date | None = None) -> None:
+async def sync_league_games(league_key: str, api_config: StatsApiLeagueConfig, target_date: date | None = None) -> None:
     db = SessionLocal()
     try:
-        league = db.query(League).filter(League.key == "mlb").first()
+        league = db.query(League).filter(League.key == league_key).first()
         if not league:
             return
         if not league.sync_enabled:
@@ -179,12 +194,11 @@ async def sync_mlb_games(target_date: date | None = None) -> None:
             return
 
         reference_date = target_date or datetime.now(timezone.utc).date()
-        # Se sincroniza "ayer" y "hoy" (no solo hoy): un juego de la Costa Oeste
-        # que empieza tarde en hora local puede caer en el día siguiente en UTC,
-        # y sin esto ese juego nunca se guardaba en la base de datos.
+        # Se sincroniza "ayer" y "hoy" (no solo hoy): un juego que empieza
+        # tarde en hora local puede caer en el día siguiente en UTC, y sin
+        # esto ese juego nunca se guardaba en la base de datos.
         # También se incluye "mañana": sin esto, partidos próximos (para
-        # predecir, o eventos especiales como el Juego de Estrellas) no
-        # aparecían hasta el mismo día.
+        # predecir, o eventos especiales) no aparecían hasta el mismo día.
         dates_to_sync = {reference_date - timedelta(days=1), reference_date, reference_date + timedelta(days=1)}
 
         # Auto-corrección: cualquier juego que sigue marcado "live" en la BD
@@ -198,11 +212,11 @@ async def sync_mlb_games(target_date: date | None = None) -> None:
         dates_to_sync |= orphaned_live_game_dates
 
         for sync_date in sorted(dates_to_sync):
-            daily_schedule = await mlb_service.get_schedule(sync_date)
+            daily_schedule = await mlb_service.get_schedule(sync_date, api_config)
             _upsert_games_from_schedule(db, league, daily_schedule)
 
         db.commit()
-        logger.info("Calendario de MLB sincronizado (%d fecha(s)).", len(dates_to_sync))
+        logger.info("Calendario de '%s' sincronizado (%d fecha(s)).", league.key, len(dates_to_sync))
     finally:
         db.close()
 
@@ -233,7 +247,7 @@ def _upsert_games_from_schedule(db, league, daily_schedule: dict) -> None:
             # creaba un equipo "placeholder" para no perder el partido, pero
             # eso es justo lo que hacía que el Juego de Estrellas apareciera
             # en la página. Los 30 equipos reales siempre existen ya gracias
-            # a sync_mlb_teams_and_standings, que corre antes que esta función.
+            # a sync_league_teams_and_standings, que corre antes que esta función.
             if not home_team or not away_team:
                 continue
 
@@ -392,15 +406,15 @@ def _prune_stale_teams(db: Session, league: League, valid_external_ids: set[str]
     return delete_teams_cascade(db, orphaned_team_ids)
 
 
-async def sync_mlb_rosters() -> None:
+async def sync_league_rosters(league_key: str) -> None:
     """
-    Sincroniza los jugadores (roster) de cada equipo de MLB. Es lo que
+    Sincroniza los jugadores (roster) de cada equipo de una liga. Es lo que
     permite que el buscador de estadísticas encuentre jugadores reales por
     nombre, no solo por ID.
     """
     db = SessionLocal()
     try:
-        league = db.query(League).filter(League.key == "mlb").first()
+        league = db.query(League).filter(League.key == league_key).first()
         if not league:
             return
         if not league.sync_enabled:
@@ -410,7 +424,7 @@ async def sync_mlb_rosters() -> None:
         teams = db.query(Team).filter(Team.league_id == league.id).all()
         for team in teams:
             try:
-                roster_response = await mlb_service.get_team_roster(int(team.external_id), CURRENT_MLB_SEASON)
+                roster_response = await mlb_service.get_team_roster(int(team.external_id), CURRENT_SEASON)
             except Exception:
                 logger.exception("No se pudo obtener el roster del equipo '%s'.", team.name)
                 continue
@@ -435,7 +449,7 @@ async def sync_mlb_rosters() -> None:
                 player.jersey_number = roster_entry.get("jerseyNumber")
 
         db.commit()
-        logger.info("Roster de MLB sincronizado (%d equipos).", len(teams))
+        logger.info("Roster de '%s' sincronizado (%d equipos).", league.key, len(teams))
     finally:
         db.close()
 
@@ -444,7 +458,7 @@ def resolve_finished_predictions() -> None:
     """
     Recorre juegos finalizados con predicciones pendientes, determina si el
     usuario acertó y otorga puntos Strike según la probabilidad al momento de
-    predecir. Se debe llamar después de sync_mlb_games.
+    predecir. Se debe llamar después de sync_league_games.
     """
     db = SessionLocal()
     try:
@@ -544,16 +558,25 @@ async def sync_news() -> None:
 
 
 async def run_full_sync() -> None:
-    """Punto de entrada único: refresca MLB (equipos, partidos, rosters) + noticias y resuelve predicciones."""
+    """
+    Punto de entrada único: refresca cada liga soportada (equipos, partidos,
+    rosters) + noticias y resuelve predicciones.
+
+    El orden importa: primero los equipos/posiciones (crean las franquicias),
+    luego los partidos (los referencian) y por último los rosters.
+    """
     db = SessionLocal()
     try:
         ensure_base_catalog(db)
     finally:
         db.close()
 
-    await sync_mlb_teams_and_standings()
-    await sync_mlb_games()
-    await sync_mlb_rosters()
+    for league_key, api_config in LEAGUE_API_CONFIGS.items():
+        await sync_league_teams_and_standings(league_key, api_config)
+    for league_key, api_config in LEAGUE_API_CONFIGS.items():
+        await sync_league_games(league_key, api_config)
+    for league_key in LEAGUE_API_CONFIGS:
+        await sync_league_rosters(league_key)
 
     await sync_news()
     resolve_finished_predictions()

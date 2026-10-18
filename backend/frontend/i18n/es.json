@@ -1,5 +1,12 @@
 {
-  "tagline": "MLB en vivo — posiciones, pitchers, noticias y predicciones",
+  "tagline": {
+    "mlb": "MLB en vivo — posiciones, pitchers, noticias y predicciones",
+    "lidom": "LIDOM en vivo — posiciones, calendario, resultados y predicciones"
+  },
+  "titles": {
+    "mlb": "StrikeHub — Béisbol MLB en vivo",
+    "lidom": "StrikeHub — LIDOM en vivo"
+  },
   "auth": {
     "login": "Iniciar sesión",
     "register": "Crear cuenta",

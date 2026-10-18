@@ -8,7 +8,7 @@
 https://strikehub.onrender.com (Render Free Plan)
 
 <p align="center">
-  <strong>La casa del béisbol: MLB en vivo, predicciones, estadísticas y noticias.</strong>
+  <strong>La casa del béisbol: MLB y LIDOM en vivo, predicciones, estadísticas y noticias.</strong>
 </p>
 
 <p align="center">
@@ -24,18 +24,19 @@ https://strikehub.onrender.com (Render Free Plan)
 
 ## 📖 About
 
-**StrikeHub** es una aplicación web dedicada 100% al béisbol de Grandes Ligas: marcadores en vivo (con diamante, outs y última jugada), pitchers probables, posiciones, estadísticas reales de bateo/pitcheo, noticias y un sistema de predicciones con puntos Strike.
+**StrikeHub** es una aplicación web dedicada al béisbol: **MLB** (Grandes Ligas) y **LIDOM** (Liga de Béisbol Profesional de la República Dominicana, temporada invernal) con un selector de liga que cambia todas las vistas. Marcadores en vivo (con diamante, outs y última jugada), pitchers probables, posiciones, estadísticas reales de bateo/pitcheo, noticias y un sistema de predicciones con puntos Strike.
 
-> Antes cubría fútbol y basketball, pero sus APIs gratuitas eran inestables e incompletas. La MLB Stats API (oficial, gratuita, sin key) es eficiente y clara, así que la página se enfocó solo en béisbol.
+> Antes cubría fútbol y basketball, pero sus APIs gratuitas eran inestables e incompletas. La MLB Stats API (oficial, gratuita, sin key) es eficiente y clara — y además expone la LIDOM bajo el mismo servicio (`sportId=17`, `leagueId=131`) — así que la página se enfocó en béisbol.
 
 ---
 
 ## ✨ Features
 
-- ⚾ Marcadores de MLB **en vivo** (diamante, conteo, última jugada)
+- ⚾ Marcadores de **MLB y LIDOM** en vivo (diamante, conteo, última jugada)
+- 🔀 Selector de liga (MLB / LIDOM): cambia todas las vistas
 - 📅 Calendario y resultados con búsqueda por fecha
 - 📊 Posiciones y estadísticas reales de bateo/pitcheo
-- 🏆 Postemporada: cuadro en vivo (Wild Card → Serie Mundial) con sembrados, victorias por serie y campeón
+- 🏆 Postemporada de MLB: cuadro en vivo (Wild Card → Serie Mundial) con sembrados, victorias por serie y campeón
 - 🎯 Predicciones con puntos Strike, historial y avisos de ganaste/perdiste
 - ❤️ Equipos favoritos
 - 👤 Autenticación segura (JWT en cookie httpOnly)
@@ -64,7 +65,7 @@ https://strikehub.onrender.com (Render Free Plan)
 
 ### Datos
 
-- **MLB Stats API** (oficial, gratuita, sin key): equipos, partidos, posiciones, rosters y stats
+- **MLB Stats API** (oficial, gratuita, sin key): equipos, partidos, posiciones, rosters y stats. Sirve a la MLB (`sportId=1`) y a la LIDOM (`sportId=17`, `leagueId=131`).
 - **ESPN RSS**: noticias con imagen
 
 ---
@@ -85,7 +86,7 @@ https://strikehub.onrender.com (Render Free Plan)
 
 ## 🚀 Project Goal
 
-Ser el lugar más rápido y limpio para seguir la MLB: abrir, ver el juego y predecir.
+Ser el lugar más rápido y limpio para seguir el béisbol (MLB y LIDOM): abrir, ver el juego y predecir.
 
 ---
 
@@ -123,8 +124,9 @@ Made by Juan Reyes
 | Historial de predicciones + aviso de ganaste/perdiste | ✅ Completo |
 | Favoritos (equipo) | ✅ Completo |
 | **MLB** — posiciones, pitchers hoy, en vivo, resultados, estadísticas reales | ✅ Funcional de extremo a extremo (MLB Stats API, gratuita, sin key) |
+| **LIDOM** — posiciones, en vivo, resultados, estadísticas reales (selector de liga) | ✅ Funcional de extremo a extremo (misma MLB Stats API, `sportId=17`) |
 | Noticias ESPN (béisbol) | ✅ Funcional |
-| Panel de administración (MLB) | ✅ Completo |
+| Panel de administración (MLB y LIDOM) | ✅ Completo |
 | PWA / "instalar app" | ✅ Básico |
 
 ## Seguridad implementada
@@ -155,7 +157,7 @@ python -c "import secrets; print(secrets.token_hex(32))"   # para SECRET_KEY
 uvicorn app.main:app --reload
 ```
 
-Abre **http://localhost:8000**. La primera vez sincroniza MLB y noticias, y se repite cada 5 minutos en segundo plano.
+Abre **http://localhost:8000**. La primera vez sincroniza MLB, LIDOM y noticias, y se repite cada 5 minutos en segundo plano.
 
 ### Variables de entorno relevantes (`.env`)
 

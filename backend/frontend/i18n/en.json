@@ -1,5 +1,12 @@
 {
-  "tagline": "MLB live — standings, pitchers, news, and predictions",
+  "tagline": {
+    "mlb": "MLB live — standings, pitchers, news, and predictions",
+    "lidom": "LIDOM live — standings, schedule, results, and predictions"
+  },
+  "titles": {
+    "mlb": "StrikeHub — MLB live baseball",
+    "lidom": "StrikeHub — LIDOM live baseball"
+  },
   "auth": {
     "login": "Log in",
     "register": "Sign up",

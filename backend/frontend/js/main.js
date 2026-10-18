@@ -1,16 +1,77 @@
 /**
- * Orquesta la interfaz principal de StrikeHub (solo MLB): renderizado de
- * posiciones, "jugadores hoy" (pitchers probables), noticias y partidos
- * (en vivo / finalizados / próximos con barra de probabilidad).
+ * Orquesta la interfaz principal de StrikeHub (béisbol: MLB y LIDOM):
+ * renderizado de posiciones, "jugadores hoy" (pitchers probables), noticias
+ * y partidos (en vivo / finalizados / próximos con barra de probabilidad).
  */
 
 /**
- * StrikeHub es solo MLB: una única liga ('mlb'), sin pestañas de deporte.
- * activeLeague existe para conservar la fecha elegida entre re-renders.
+ * El sitio tiene dos ligas intercambiables con el selector de la barra
+ * superior. activeLeague guarda la liga activa, es la que consumen todas las
+ * vistas y además conserva la fecha elegida entre re-renders.
  */
-const LEAGUE_KEY = 'mlb';
+const LEAGUE_KEY = 'mlb'; // liga por defecto al cargar
 const SPORT_KEY = 'baseball';
+const SUPPORTED_LEAGUES = ['mlb', 'lidom'];
+// Vistas exclusivas de MLB: el bracket tiene formato AL/NL (LIDOM usa otro
+// formato) y los líderes de la Stats API mezclan TODAS las ligas invernales.
+// Se ocultan cuando la liga activa es LIDOM.
+const MLB_ONLY_VIEWS = new Set(['postseason', 'leaders']);
 let activeLeague = LEAGUE_KEY;
+
+/* ---------------------- Selector de liga (MLB / LIDOM) ----------------------
+   Cambia la liga activa de TODAS las vistas. Las vistas exclusivas de MLB
+   (postemporada y líderes) se ocultan al elegir LIDOM. */
+
+function updateLeagueChrome() {
+  const selector = document.getElementById('league-select');
+  if (selector) selector.value = activeLeague;
+
+  document.querySelectorAll('.view-tab').forEach((navTab) => {
+    if (MLB_ONLY_VIEWS.has(navTab.dataset.view)) {
+      navTab.classList.toggle('hidden', activeLeague !== 'mlb');
+    }
+  });
+
+  const taglineElement = document.querySelector('.tagline');
+  if (taglineElement) taglineElement.textContent = t(`tagline.${activeLeague}`);
+  document.title = t(`titles.${activeLeague}`);
+}
+
+async function refreshTickerForLeague() {
+  // El ticker está arriba de toda la página: al cambiar de liga hay que
+  // repintarlo aunque la vista activa no sea "En vivo" ni "Calendario".
+  try {
+    const { visibleGames } = await fetchDisplayGames(activeLeague);
+    renderTicker(visibleGames);
+  } catch (_) {
+    /* silencioso: el ticker no es crítico */
+  }
+}
+
+function setActiveLeague(leagueKey) {
+  if (!SUPPORTED_LEAGUES.includes(leagueKey) || leagueKey === activeLeague) return;
+  activeLeague = leagueKey;
+  stopLivePolling();
+  stopPostseasonPolling();
+
+  const dateFilterInput = document.getElementById('games-date-input');
+  if (dateFilterInput) dateFilterInput.value = '';
+
+  updateLeagueChrome();
+  refreshTickerForLeague();
+  // Si la vista actual no existe en la nueva liga (postemporada / líderes),
+  // se vuelve a "En vivo" en vez de quedar en una sección oculta.
+  const nextView = MLB_ONLY_VIEWS.has(activeView) ? 'live' : activeView;
+  loadedViews.clear();
+  showView(nextView);
+}
+
+function initLeagueSelector() {
+  const selector = document.getElementById('league-select');
+  if (!selector) return;
+  selector.value = activeLeague;
+  selector.addEventListener('change', (changeEvent) => setActiveLeague(changeEvent.target.value));
+}
 
 function formatDate(isoTimestamp) {
   return new Date(isoTimestamp).toLocaleString(i18nState.lang === 'es' ? 'es-ES' : 'en-US', {
@@ -66,7 +127,7 @@ async function renderStandings(leagueKey) {
   }
 }
 
-/* ---------------------- Jugadores hoy (pitchers probables en MLB) ---------------------- */
+/* ---------------------- Jugadores hoy (pitchers probables) ---------------------- */
 async function renderPlayersToday(leagueKey) {
   const playersContainer = document.getElementById('players-today-container');
   playersContainer.innerHTML = `<p class="empty-state">${t('common.loading')}</p>`;
@@ -771,6 +832,9 @@ const VIEW_LOADERS = {
 
 function showView(viewName) {
   if (!VIEW_LOADERS[viewName]) return;
+  // Postemporada y líderes no existen en LIDOM: si por alguna razón se pide
+  // una de esas vistas con LIDOM activo, se muestra "En vivo" en su lugar.
+  if (MLB_ONLY_VIEWS.has(viewName) && activeLeague !== 'mlb') viewName = 'live';
   activeView = viewName;
   document.querySelectorAll('.view-tab').forEach((navTab) => {
     navTab.classList.toggle('active', navTab.dataset.view === viewName);
@@ -814,6 +878,7 @@ function initDateSearch() {
 async function loadMainContent() {
   resetStatsSearch();
   activeLeague = LEAGUE_KEY;
+  updateLeagueChrome();
   const dateFilterInput = document.getElementById('games-date-input');
   if (dateFilterInput) dateFilterInput.value = '';
   loadedViews.clear();
@@ -822,8 +887,10 @@ async function loadMainContent() {
 
 document.addEventListener('bfb:language-changed', () => {
   // Recarga la vista actual en el nuevo idioma; las demás se recargarán
-  // cuando se visiten (loadedViews se limpia).
+  // cuando se visiten (loadedViews se limpia). updateLeagueChrome() repinta
+  // la cabecera (título/lema) porque el idioma cambió.
   loadedViews.clear();
+  updateLeagueChrome();
   showView(activeView);
 });
 
@@ -844,6 +911,7 @@ document.addEventListener('bfb:user-changed', () => {
 async function initApp() {
   await initI18n();
   initAuth();
+  initLeagueSelector();
   initViewNav();
   initDateSearch();
   initStatsSearch();

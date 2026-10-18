@@ -3,16 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>StrikeHub — Béisbol MLB en vivo</title>
-  <meta name="description" content="StrikeHub: sigue la MLB en vivo. Posiciones, pitchers probables, noticias, estadísticas y predicciones.">
+  <title>StrikeHub — Béisbol MLB y LIDOM en vivo</title>
+  <meta name="description" content="StrikeHub: sigue la MLB y la LIDOM en vivo. Posiciones, pitchers probables, noticias, estadísticas y predicciones.">
 
   <!-- Ícono para pantalla principal (Android/PWA) -->
-  <link rel="manifest" href="manifest.json?v=20261018">
-  <link rel="icon" type="image/svg+xml" href="assets/icons/favicon.svg?v=20261018">
-  <link rel="icon" type="image/png" sizes="32x32" href="assets/icons/favicon-32.png?v=20261018">
-  <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/icon-192.png?v=20261018">
+  <link rel="manifest" href="manifest.json?v=20261019">
+  <link rel="icon" type="image/svg+xml" href="assets/icons/favicon.svg?v=20261019">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/icons/favicon-32.png?v=20261019">
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/icon-192.png?v=20261019">
   <!-- Ícono para pantalla principal en iPhone/iPad (iOS no usa manifest.json para esto) -->
-  <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png?v=20261018">
+  <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png?v=20261019">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="StrikeHub">
   <meta name="theme-color" content="#0a0a0c">
@@ -23,15 +23,20 @@
 
   <!-- Cache-busting: sube el número ?v= en CSS/JS cada vez que cambien,
        para que el navegador no siga usando una versión vieja cacheada. -->
-  <link rel="stylesheet" href="dist/styles.min.css?v=20261018">
+  <link rel="stylesheet" href="dist/styles.min.css?v=20261019">
 </head>
 <body>
 
 
-  <!-- Barra superior: idioma + estado de usuario -->
+  <!-- Barra superior: liga + idioma + estado de usuario -->
   <div class="topbar">
     <div class="container">
       <div class="topbar-actions">
+        <!-- Selector de liga: cambia TODAS las vistas entre MLB y LIDOM. -->
+        <select id="league-select" class="league-select" aria-label="Liga / League">
+          <option value="mlb">MLB</option>
+          <option value="lidom">LIDOM</option>
+        </select>
         <select id="lang-select" class="lang-select" aria-label="Idioma / Language">
           <option value="es">ES</option>
           <option value="en">EN</option>
@@ -46,9 +51,9 @@
     <div class="container">
       <div class="brand">
         <h1 class="brand-title">
-          <img class="brand-logo" src="assets/logos/strikehub-logo.svg?v=20261018" alt="StrikeHub" width="359" height="84">
+          <img class="brand-logo" src="assets/logos/strikehub-logo.svg?v=20261019" alt="StrikeHub" width="359" height="84">
         </h1>
-        <p class="tagline" data-i18n="tagline">MLB en vivo — posiciones, pitchers, noticias y predicciones</p>
+        <p class="tagline" data-i18n="tagline.mlb">MLB en vivo — posiciones, pitchers, noticias y predicciones</p>
       </div>
     </div>
   </header>
@@ -229,6 +234,6 @@
 
   <!-- Bundle único minificado (generado con esbuild desde js/*.js, mismo
        orden): 1 request en vez de 9. Ver frontend/dist/README. -->
-  <script src="dist/app.bundle.min.js?v=20261018"></script>
+  <script src="dist/app.bundle.min.js?v=20261019"></script>
 </body>
 </html>

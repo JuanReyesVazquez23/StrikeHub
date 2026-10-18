@@ -236,9 +236,9 @@ def compare_teams(
 async def _load_player_profile(player_id: int, db: Session) -> dict:
     """
     Construye el perfil completo de un jugador (posición, equipo, y
-    estadísticas reales si es de MLB). Función compartida entre el
-    endpoint de un solo jugador y el de comparación, para no duplicar
-    la misma lógica dos veces.
+    estadísticas reales si su liga está soportada por la MLB Stats API).
+    Función compartida entre el endpoint de un solo jugador y el de
+    comparación, para no duplicar la misma lógica dos veces.
     """
     player = (
         db.query(Player)
@@ -252,11 +252,20 @@ async def _load_player_profile(player_id: int, db: Session) -> dict:
     batting_line = None
     pitching_line = None
 
-    is_mlb_rostered = player.team and player.team.league and player.team.league.data_provider == "mlb_stats_api"
-    if is_mlb_rostered:
+    # Las estadísticas de temporada se piden filtrando por la liga del jugador
+    # (MLB = sportId 1, LIDOM = sportId 17). Sin ese filtro, un jugador que
+    # juega en ambas el mismo año mezclaría los splits de una y otra.
+    player_league = player.team.league if player.team else None
+    api_config = None
+    if player_league and player_league.data_provider == "mlb_stats_api":
+        api_config = mlb_service.LEAGUE_API_CONFIGS.get(player_league.key)
+
+    if api_config:
         try:
             current_season_year = datetime.now(timezone.utc).year
-            season_stats_response = await mlb_service.get_player_season_stats(int(player.external_id), current_season_year)
+            season_stats_response = await mlb_service.get_player_season_stats(
+                int(player.external_id), current_season_year, api_config.sport_id
+            )
             batting_line = mlb_service.extract_batting_stats(season_stats_response["hitting"])
             pitching_line = mlb_service.extract_pitching_stats(season_stats_response["pitching"])
         except Exception:

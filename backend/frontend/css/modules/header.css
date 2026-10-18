@@ -1,4 +1,4 @@
-/* ---------- Barra superior: idioma + cuenta ---------- */
+/* ---------- Barra superior: liga + idioma + cuenta ---------- */
 .topbar {
   background: rgba(10, 10, 12, 0.85);
   backdrop-filter: blur(10px);
@@ -25,7 +25,8 @@
   min-width: 0;
 }
 
-.lang-select {
+.lang-select,
+.league-select {
   background: var(--bfb-surface);
   color: var(--bfb-white);
   border: 1px solid var(--bfb-border);
@@ -33,6 +34,13 @@
   padding: 5px 8px;
   font-size: 12px;
   flex-shrink: 0;
+}
+
+/* El selector de liga es un filtro global: se destaca un poco más. */
+.league-select {
+  font-weight: 700;
+  color: var(--bfb-yellow);
+  border-color: var(--bfb-yellow-dim);
 }
 
 .user-status {

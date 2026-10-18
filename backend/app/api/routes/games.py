@@ -96,12 +96,14 @@ async def get_game_live_situation(
     db: Session = Depends(get_db),
 ):
     """
-    Situación en vivo de un juego de MLB (bases, outs, bateador, pitcher,
-    última jugada). A diferencia de /games/{id}, esto consulta a MLB
-    DIRECTAMENTE en el momento de la petición, sin pasar por la base de
-    datos ni esperar al ciclo de sincronización de 5 minutos — así el
-    frontend puede sondear este endpoint cada pocos segundos y mostrar
-    algo realmente "al momento" mientras el usuario ve el partido.
+    Situación en vivo de un juego de béisbol (bases, outs, bateador,
+    pitcher, última jugada): sirve para MLB y para la LIDOM, porque ambas
+    se sirven desde la misma MLB Stats API. A diferencia de /games/{id},
+    esto consulta a la API DIRECTAMENTE en el momento de la petición, sin
+    pasar por la base de datos ni esperar al ciclo de sincronización de 5
+    minutos — así el frontend puede sondear este endpoint cada pocos
+    segundos y mostrar algo realmente "al momento" mientras el usuario ve
+    el partido.
 
     lang: si es "es", la descripción de "última jugada" se traduce al
     momento (cambia en cada jugada, así que no tiene sentido guardarla
@@ -114,7 +116,7 @@ async def get_game_live_situation(
     if target_game.league.data_provider != "mlb_stats_api":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="El detalle en vivo solo está disponible para partidos de MLB por ahora.",
+            detail="El detalle en vivo solo está disponible para partidos servidos por la MLB Stats API.",
         )
 
     if target_game.status != "live":
