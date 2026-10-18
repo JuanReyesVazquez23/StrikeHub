@@ -9,7 +9,7 @@ const i18nState = {
   messages: {},
 };
 
-const I18N_VERSION = '20261020';
+const I18N_VERSION = '20261021';
 
 async function loadDictionary(lang) {
   const localeResponse = await fetch(`i18n/${lang}.json?v=${I18N_VERSION}`);

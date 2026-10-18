@@ -46,8 +46,11 @@ function storeLeague(leagueKey) {
    (postemporada y líderes) se ocultan al elegir LIDOM. */
 
 function updateLeagueChrome() {
-  const selector = document.getElementById('league-select');
-  if (selector) selector.value = activeLeague;
+  document.querySelectorAll('#league-switch .league-switch-btn').forEach((leagueButton) => {
+    const isActive = leagueButton.dataset.league === activeLeague;
+    leagueButton.classList.toggle('active', isActive);
+    leagueButton.setAttribute('aria-pressed', String(isActive));
+  });
 
   document.querySelectorAll('.view-tab').forEach((navTab) => {
     if (MLB_ONLY_VIEWS.has(navTab.dataset.view)) {
@@ -98,10 +101,10 @@ function setActiveLeague(leagueKey) {
 }
 
 function initLeagueSelector() {
-  const selector = document.getElementById('league-select');
-  if (!selector) return;
-  selector.value = activeLeague;
-  selector.addEventListener('change', (changeEvent) => setActiveLeague(changeEvent.target.value));
+  // Dos botones separados (MLB / LIDOM): un clic cambia la liga activa.
+  document.querySelectorAll('#league-switch .league-switch-btn').forEach((leagueButton) => {
+    leagueButton.addEventListener('click', () => setActiveLeague(leagueButton.dataset.league));
+  });
 }
 
 function formatDate(isoTimestamp) {

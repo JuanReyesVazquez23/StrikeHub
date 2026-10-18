@@ -25,8 +25,7 @@
   min-width: 0;
 }
 
-.lang-select,
-.league-select {
+.lang-select {
   background: var(--bfb-surface);
   color: var(--bfb-white);
   border: 1px solid var(--bfb-border);
@@ -36,11 +35,39 @@
   flex-shrink: 0;
 }
 
-/* El selector de liga es un filtro global: se destaca un poco más. */
-.league-select {
-  font-weight: 700;
+/* Cambio de liga: dos botones separados siempre visibles (no un desplegable
+   que haya que abrir). Es un filtro global, así que se destaca un poco más. */
+.league-switch {
+  display: inline-flex;
+  border: 1px solid var(--bfb-yellow-dim);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.league-switch-btn {
+  background: var(--bfb-surface);
   color: var(--bfb-yellow);
-  border-color: var(--bfb-yellow-dim);
+  border: 0;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.league-switch-btn + .league-switch-btn {
+  border-left: 1px solid var(--bfb-border);
+}
+
+.league-switch-btn:hover:not(.active) {
+  background: var(--bfb-surface-alt);
+}
+
+.league-switch-btn.active {
+  background: var(--bfb-yellow);
+  color: var(--bfb-black);
 }
 
 .user-status {
