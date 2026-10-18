@@ -49,6 +49,30 @@ PLAY_PHRASES_BY_EVENT_TYPE = {
     "balk": "Balk",
 }
 
+# Cómo salió la bola, tal como lo cuenta la descripción en inglés de la API
+# ("flies out to center fielder...", "grounds out, shortstop...").
+# Verificado contra 9 juegos de la LIDOM: todas las jugadas de campo entran en
+# esta tabla, así que "batea para out" queda solo como respaldo.
+BATTED_BALL_PHRASES = (
+    ("flies out", "elevado"),
+    ("pops out", "elevado corto"),
+    ("lines out", "línea"),
+    ("grounds out", "rodado"),
+    ("pops into", "elevado corto"),
+    ("lines into", "línea"),
+    ("flies into", "elevado"),
+    ("grounds into", "rodado"),
+)
+
+
+def _batted_ball(play: dict) -> str | None:
+    """Cómo salió la bola (rodado, elevado, elevado corto, línea) o None."""
+    description = ((play.get("result") or {}).get("description") or "").lower()
+    for event_keyword, batted_ball in BATTED_BALL_PHRASES:
+        if event_keyword in description:
+            return batted_ball
+    return None
+
 
 def _rbi_clause(rbi: int) -> str:
     """Cláusula de carreras remolcadas (" y remolca 1 carrera" / "N carreras")."""
@@ -70,7 +94,8 @@ def describe_play_in_spanish(play: dict | None) -> str | None:
         return None
 
     result = play.get("result") or {}
-    phrase_template = PLAY_PHRASES_BY_EVENT_TYPE.get((result.get("eventType") or "").strip())
+    event_type = (result.get("eventType") or "").strip()
+    phrase_template = PLAY_PHRASES_BY_EVENT_TYPE.get(event_type)
     if not phrase_template:
         return None
 
@@ -79,5 +104,16 @@ def describe_play_in_spanish(play: dict | None) -> str | None:
         return None
 
     sentence = phrase_template.format(batter=batter_name)
+    # Las jugadas de campo se cuentan con el detalle de cómo salió la bola:
+    # "se retira con rodado" dice más que el genérico "batea para out".
+    if event_type == "field_out":
+        batted_ball = _batted_ball(play)
+        if batted_ball:
+            sentence = f"{batter_name} se retira con {batted_ball}"
+    elif event_type == "force_out":
+        batted_ball = _batted_ball(play)
+        if batted_ball:
+            sentence = f"{batter_name} se retira con {batted_ball} por fuerza"
+
     rbi = int(result.get("rbi") or 0)
     return f"{sentence}{_rbi_clause(rbi)}."

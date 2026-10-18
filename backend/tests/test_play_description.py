@@ -56,6 +56,43 @@ class DescribePlayInSpanishTest(unittest.TestCase):
             with self.subTest(event_type=event_type):
                 self.assertEqual(describe_play_in_spanish(_play(event_type, batter="Vidal Bruján")), esperado)
 
+    def test_las_jugadas_de_campo_dicen_como_salio_la_bola(self):
+        casos = {
+            "flies out to center fielder Victor Scott II.": "elevado",
+            "grounds out, shortstop Emil Morales to first baseman Aderlin Rodríguez.": "rodado",
+            "lines out to left fielder Chandler Simpson.": "línea",
+            "pops out to second baseman Eddinson Paulino.": "elevado corto",
+        }
+        for description, batted_ball in casos.items():
+            with self.subTest(description=description):
+                self.assertEqual(
+                    describe_play_in_spanish(_play("field_out", batter="Roldy Brito", description=description)),
+                    f"Roldy Brito se retira con {batted_ball}.",
+                )
+
+    def test_out_por_fuerza_dice_como_salio_la_bola(self):
+        self.assertEqual(
+            describe_play_in_spanish(
+                _play(
+                    "force_out",
+                    description="Victor Scott II grounds into a force out, second baseman Eddinson Paulino to shortstop Emil Morales.",
+                )
+            ),
+            "Jonathan Guzmán se retira con rodado por fuerza.",
+        )
+
+    def test_out_sin_detalle_de_la_bola_usa_la_frase_generica(self):
+        self.assertEqual(
+            describe_play_in_spanish(_play("field_out", description="Out recorded.")),
+            "Jonathan Guzmán batea para out.",
+        )
+
+    def test_la_jugada_de_campo_con_remolcada_suma_la_clausula(self):
+        self.assertEqual(
+            describe_play_in_spanish(_play("field_out", description="Grounds out, shortstop to first base.", rbi=1)),
+            "Jonathan Guzmán se retira con rodado y remolca 1 carrera.",
+        )
+
     def test_jugada_de_corrido_sin_bateador(self):
         jugada = {"result": {"eventType": "stolen_base", "rbi": 0}, "about": {"isComplete": True}, "matchup": {}}
         self.assertEqual(describe_play_in_spanish(jugada), "Base robada.")
