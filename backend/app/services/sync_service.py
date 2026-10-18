@@ -502,6 +502,63 @@ def resolve_finished_predictions() -> None:
         db.close()
 
 
+def _upsert_news_articles(
+    db: Session,
+    feed_articles: list[dict],
+    *,
+    sport_id: int,
+    league_id: int | None = None,
+    translate: bool = True,
+) -> None:
+    """
+    Inserta/actualiza artículos de noticias ya descargados.
+
+    translate=False para fuentes que ya vienen en español (ej. la prensa
+    dominicana que cubre la LIDOM): ahí el texto original es el que se
+    muestra en español y no hay nada que traducir.
+    """
+    for feed_article in feed_articles:
+        if not feed_article["article_url"]:
+            continue
+
+        existing = (
+            db.query(NewsArticle).filter(NewsArticle.article_url == feed_article["article_url"]).first()
+        )
+        if existing:
+            # Se actualiza la imagen y el resumen aunque el artículo ya
+            # exista: si el artículo se guardó antes de una mejora en
+            # la extracción de imagen, esto permite que se "autocorrija"
+            # en el siguiente ciclo en vez de quedarse sin imagen para siempre.
+            existing.image_url = feed_article["image_url"] or existing.image_url
+            if feed_article["summary"] and feed_article["summary"] != existing.summary:
+                existing.summary = feed_article["summary"]
+                existing.summary_es = None  # el resumen cambió: se re-traduce abajo
+
+            # Solo se traduce si todavía no hay traducción (evita
+            # volver a traducir lo mismo cada 5 minutos sin necesidad).
+            if translate:
+                if not existing.title_es:
+                    existing.title_es = translation_service.translate_to_spanish(existing.title)
+                if not existing.summary_es and existing.summary:
+                    existing.summary_es = translation_service.translate_to_spanish(existing.summary)
+            continue
+
+        db.add(
+            NewsArticle(
+                sport_id=sport_id,
+                league_id=league_id,
+                title=feed_article["title"],
+                title_es=translation_service.translate_to_spanish(feed_article["title"]) if translate else None,
+                summary=feed_article["summary"],
+                summary_es=translation_service.translate_to_spanish(feed_article["summary"]) if translate else None,
+                image_url=feed_article["image_url"],
+                source=feed_article["source"],
+                article_url=feed_article["article_url"],
+                published_at=feed_article["published_at"],
+            )
+        )
+
+
 async def sync_news() -> None:
     db = SessionLocal()
     try:
@@ -513,46 +570,42 @@ async def sync_news() -> None:
                 logger.exception("No se pudieron obtener noticias de '%s'.", sport.key)
                 continue
 
-            for feed_article in fetched_articles:
-                if not feed_article["article_url"]:
-                    continue
-
-                existing = (
-                    db.query(NewsArticle).filter(NewsArticle.article_url == feed_article["article_url"]).first()
-                )
-                if existing:
-                    # Se actualiza la imagen y el resumen aunque el artículo ya
-                    # exista: si el artículo se guardó antes de una mejora en
-                    # la extracción de imagen, esto permite que se "autocorrija"
-                    # en el siguiente ciclo en vez de quedarse sin imagen para siempre.
-                    existing.image_url = feed_article["image_url"] or existing.image_url
-                    if feed_article["summary"] and feed_article["summary"] != existing.summary:
-                        existing.summary = feed_article["summary"]
-                        existing.summary_es = None  # el resumen cambió: se re-traduce abajo
-
-                    # Solo se traduce si todavía no hay traducción (evita
-                    # volver a traducir lo mismo cada 5 minutos sin necesidad).
-                    if not existing.title_es:
-                        existing.title_es = translation_service.translate_to_spanish(existing.title)
-                    if not existing.summary_es and existing.summary:
-                        existing.summary_es = translation_service.translate_to_spanish(existing.summary)
-                    continue
-
-                db.add(
-                    NewsArticle(
-                        sport_id=sport.id,
-                        title=feed_article["title"],
-                        title_es=translation_service.translate_to_spanish(feed_article["title"]),
-                        summary=feed_article["summary"],
-                        summary_es=translation_service.translate_to_spanish(feed_article["summary"]),
-                        image_url=feed_article["image_url"],
-                        source=feed_article["source"],
-                        article_url=feed_article["article_url"],
-                        published_at=feed_article["published_at"],
-                    )
-                )
+            _upsert_news_articles(db, fetched_articles, sport_id=sport.id)
             db.commit()
-        logger.info("Noticias sincronizadas para %d deporte(s).", len(sports))
+
+        # Noticias propias de una liga (ej. la LIDOM, cubierta por prensa
+        # dominicana). Se guardan con league_id para no mezclarlas con las
+        # noticias generales del deporte; ya vienen en español, así que no se
+        # traducen.
+        for league_key in news_service.FEEDS_BY_LEAGUE:
+            league = db.query(League).filter(League.key == league_key).first()
+            if not league:
+                continue
+
+            league_teams = db.query(Team).filter(Team.league_id == league.id).all()
+            team_name_hints = [team.short_name or team.name for team in league_teams]
+            try:
+                fetched_articles = await news_service.fetch_league_news(
+                    league_key, team_name_hints, limit=15
+                )
+            except Exception:
+                logger.exception("No se pudieron obtener noticias de la liga '%s'.", league_key)
+                continue
+
+            _upsert_news_articles(
+                db,
+                fetched_articles,
+                sport_id=league.sport_id,
+                league_id=league.id,
+                translate=False,
+            )
+            db.commit()
+
+        logger.info(
+            "Noticias sincronizadas para %d deporte(s) y %d liga(s).",
+            len(sports),
+            len(news_service.FEEDS_BY_LEAGUE),
+        )
     finally:
         db.close()
 

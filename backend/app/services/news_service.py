@@ -1,5 +1,5 @@
 """
-Obtención de noticias deportivas reales vía RSS de ESPN.
+Obtención de noticias deportivas reales vía feeds RSS públicos.
 
 Términos de uso de ESPN RSS (obligatorio cumplir):
 - Solo se muestra el contenido tal cual viene en el feed (título + resumen),
@@ -10,8 +10,13 @@ Términos de uso de ESPN RSS (obligatorio cumplir):
 
 Esta función NO reproduce el artículo completo, solo el resumen que ESPN
 distribuye en su propio feed público para ese fin.
+
+Además del feed general de ESPN, se usan feeds de prensa local para las ligas
+que ESPN no cubre (ej. la LIDOM, desde un medio dominicano). En esos casos se
+muestra al pie de la noticia el medio real del que proviene (campo 'source').
 """
 import re
+import unicodedata
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
@@ -26,10 +31,31 @@ FEEDS_BY_SPORT = {
     "baseball": settings.NEWS_RSS_MLB,
 }
 
+# Feeds específicos de una liga: url -> nombre de la fuente que se muestra.
+# La LIDOM no tiene feed propio en ESPN, así que se cubre desde prensa
+# dominicana. Ese feed es de "Deportes" en general (trae otros deportes), por
+# eso al sincronizar se filtra a lo que menciona la liga o sus equipos.
+FEEDS_BY_LEAGUE = {
+    "lidom": (settings.NEWS_RSS_LIDOM, settings.NEWS_SOURCE_LIDOM),
+}
+
+# Palabras (se comparan normalizadas, sin acentos) que identifican una noticia
+# como de la liga, además de los nombres/apodos de sus equipos (que se
+# detectan dinámicamente desde la BD y se pasan a fetch_league_news).
+LEAGUE_KEYWORDS = {
+    "lidom": ("lidom", "pelota invernal"),
+}
+
 # Busca el primer <img src="..."> dentro de HTML (algunos feeds de ESPN
 # incrustan la imagen directamente en el resumen en vez de usar una etiqueta
 # de imagen aparte).
 _INLINE_IMAGE_PATTERN = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
+
+
+def _normalize_for_match(text_value: str) -> str:
+    """Minúsculas y sin acentos, para comparar "Águilas" con "aguilas"."""
+    decomposed = unicodedata.normalize("NFKD", text_value or "")
+    return "".join(character for character in decomposed if not unicodedata.combining(character)).lower()
 
 
 def _extract_article_image(feed_entry: dict) -> str | None:
@@ -79,8 +105,11 @@ def _parse_published_date(feed_entry: dict) -> datetime:
     return datetime.now(timezone.utc)
 
 
-async def fetch_rss_news(feed_url: str, limit: int = 15) -> list[dict]:
-    """Descarga y parsea un feed RSS, devolviendo una lista de artículos normalizados."""
+async def fetch_rss_news(feed_url: str, limit: int = 15, source: str = "ESPN") -> list[dict]:
+    """
+    Descarga y parsea un feed RSS, devolviendo una lista de artículos
+    normalizados. 'source' es el medio que se muestra al pie de la noticia.
+    """
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, headers={"User-Agent": "BFBDeportes/1.0"}) as client:
         response = await client.get(feed_url)
         response.raise_for_status()
@@ -94,7 +123,7 @@ async def fetch_rss_news(feed_url: str, limit: int = 15) -> list[dict]:
                 "title": feed_entry.get("title", "").strip(),
                 "summary": _strip_html(feed_entry.get("summary", "")).strip() or None,
                 "image_url": _extract_article_image(feed_entry),
-                "source": "ESPN",
+                "source": source,
                 "article_url": feed_entry.get("link"),
                 "published_at": _parse_published_date(feed_entry),
             }
@@ -109,3 +138,38 @@ async def fetch_general_baseball_news(limit: int = 10) -> list[dict]:
 async def fetch_general_news(sport_key: str, limit: int = 10) -> list[dict]:
     feed_url = FEEDS_BY_SPORT.get(sport_key, settings.NEWS_RSS_MLB)
     return await fetch_rss_news(feed_url, limit=limit)
+
+
+async def fetch_league_news(league_key: str, team_name_hints: list[str], limit: int = 15) -> list[dict]:
+    """
+    Noticias de una liga concreta (ej. la LIDOM, cubierta por prensa
+    dominicana). Ese feed es de "Deportes" en general, así que se descartan
+    las noticias que no mencionan la liga ni a ninguno de sus equipos.
+
+    team_name_hints: nombres y apodos de los equipos de la liga, tal como
+    están en la BD (se comparan sin acentos ni mayúsculas).
+    """
+    feed = FEEDS_BY_LEAGUE.get(league_key)
+    if not feed:
+        return []
+    feed_url, feed_source = feed
+
+    # Se pide un lote más grande y se filtra después: el feed mezcla varios
+    # deportes, así que no todas las entradas son de la liga.
+    fetched_articles = await fetch_rss_news(feed_url, limit=50, source=feed_source)
+
+    normalized_keywords = [_normalize_for_match(keyword) for keyword in LEAGUE_KEYWORDS.get(league_key, ())]
+    normalized_hints = [_normalize_for_match(hint) for hint in team_name_hints if hint]
+
+    relevant_articles = []
+    for feed_article in fetched_articles:
+        # Las palabras propias de la liga (ej. "LIDOM") se buscan en todo el
+        # texto, pero los nombres de equipos solo en el titular: "Estrellas" o
+        # "Toros" son palabras comunes que en un resumen darían falsos positivos.
+        full_text = _normalize_for_match(f"{feed_article.get('title') or ''} {feed_article.get('summary') or ''}")
+        title_text = _normalize_for_match(feed_article.get("title") or "")
+        mentions_league = any(keyword in full_text for keyword in normalized_keywords)
+        mentions_team = any(hint in title_text for hint in normalized_hints)
+        if mentions_league or mentions_team:
+            relevant_articles.append(feed_article)
+    return relevant_articles[:limit]

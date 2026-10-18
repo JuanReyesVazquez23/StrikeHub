@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     # --- Noticias (RSS oficiales, gratuitos, con imagen) ---
     NEWS_RSS_GENERAL: str = "https://www.espn.com/espn/rss/news"
     NEWS_RSS_MLB: str = "https://www.espn.com/espn/rss/mlb/news"
+    # La LIDOM no tiene feed propio en ESPN: se cubre desde prensa dominicana.
+    # El feed es de "Deportes" (trae también otros deportes), así que al
+    # sincronizar se filtra a las noticias que mencionan la liga o sus equipos
+    # (ver LEAGUE_KEYWORDS en app/services/news_service.py).
+    NEWS_RSS_LIDOM: str = "https://www.diariolibre.com/rss/deportes.xml"
+    NEWS_SOURCE_LIDOM: str = "Diario Libre"
     # Frecuencia mínima (minutos) entre refrescos de noticias por sección, para no saturar la fuente.
     NEWS_REFRESH_MINUTES: int = 15
 

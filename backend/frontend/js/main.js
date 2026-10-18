@@ -9,14 +9,37 @@
  * superior. activeLeague guarda la liga activa, es la que consumen todas las
  * vistas y además conserva la fecha elegida entre re-renders.
  */
-const LEAGUE_KEY = 'mlb'; // liga por defecto al cargar
+const LEAGUE_KEY = 'mlb'; // liga por defecto (primera visita)
 const SPORT_KEY = 'baseball';
 const SUPPORTED_LEAGUES = ['mlb', 'lidom'];
+// Clave de localStorage donde se recuerda la liga elegida, para que al volver
+// el usuario encuentre la misma que estaba viendo.
+const LEAGUE_STORAGE_KEY = 'bfb_active_league';
 // Vistas exclusivas de MLB: el bracket tiene formato AL/NL (LIDOM usa otro
 // formato) y los líderes de la Stats API mezclan TODAS las ligas invernales.
 // Se ocultan cuando la liga activa es LIDOM.
 const MLB_ONLY_VIEWS = new Set(['postseason', 'leaders']);
-let activeLeague = LEAGUE_KEY;
+let activeLeague = readStoredLeague();
+
+/* ---------------------- Liga recordada (localStorage) ---------------------- */
+
+function readStoredLeague() {
+  try {
+    const storedLeague = localStorage.getItem(LEAGUE_STORAGE_KEY);
+    if (SUPPORTED_LEAGUES.includes(storedLeague)) return storedLeague;
+  } catch (_) {
+    /* localStorage puede estar bloqueado (modo privado): se usa el valor por defecto */
+  }
+  return LEAGUE_KEY;
+}
+
+function storeLeague(leagueKey) {
+  try {
+    localStorage.setItem(LEAGUE_STORAGE_KEY, leagueKey);
+  } catch (_) {
+    /* silencioso: recordar la liga es una comodidad, no algo crítico */
+  }
+}
 
 /* ---------------------- Selector de liga (MLB / LIDOM) ----------------------
    Cambia la liga activa de TODAS las vistas. Las vistas exclusivas de MLB
@@ -35,6 +58,13 @@ function updateLeagueChrome() {
   const taglineElement = document.querySelector('.tagline');
   if (taglineElement) taglineElement.textContent = t(`tagline.${activeLeague}`);
   document.title = t(`titles.${activeLeague}`);
+
+  // El título de la sección de noticias también cambia con la liga (la MLB
+  // muestra las noticias generales del béisbol; la LIDOM, las de su liga).
+  const newsTitleElement = document.getElementById('news-section-title');
+  if (newsTitleElement) {
+    newsTitleElement.textContent = t(activeLeague === 'lidom' ? 'sections.newsLidom' : 'sections.generalNews');
+  }
 }
 
 async function refreshTickerForLeague() {
@@ -51,6 +81,7 @@ async function refreshTickerForLeague() {
 function setActiveLeague(leagueKey) {
   if (!SUPPORTED_LEAGUES.includes(leagueKey) || leagueKey === activeLeague) return;
   activeLeague = leagueKey;
+  storeLeague(leagueKey);
   stopLivePolling();
   stopPostseasonPolling();
 
@@ -161,13 +192,17 @@ async function renderPlayersToday(leagueKey) {
 }
 
 /* ---------------------- Noticias ---------------------- */
-async function renderNews(sportKey) {
+async function renderNews(sportKey, leagueKey) {
   const newsContainer = document.getElementById('news-container');
   newsContainer.innerHTML = `<p class="empty-state">${t('common.loading')}</p>`;
   try {
     // sort=trending: prioriza noticias sobre equipos de los que hay más
     // cobertura reciente (relevancia real por menciones), no solo la más nueva.
-    const newsArticles = await api.get(`/news/${sportKey}?sort=trending&lang=${i18nState.lang}`);
+    // Se piden las noticias de la liga activa (ej. LIDOM); si esa liga todavía
+    // no tiene noticias propias, el backend responde con las generales del
+    // deporte, así que la sección nunca queda vacía por eso.
+    const newsEndpoint = leagueKey ? `/news/league/${leagueKey}` : `/news/${sportKey}`;
+    const newsArticles = await api.get(`${newsEndpoint}?sort=trending&lang=${i18nState.lang}`);
     if (!newsArticles.length) {
       newsContainer.innerHTML = `<p class="empty-state">${t('common.newsEmpty')}</p>`;
       return;
@@ -826,7 +861,7 @@ const VIEW_LOADERS = {
   standings: () => renderStandings(activeLeague),
   postseason: () => renderPostseason(),
   leaders: () => renderLeaders(),
-  news: () => Promise.all([renderNews(SPORT_KEY), renderPlayersToday(activeLeague)]),
+  news: () => Promise.all([renderNews(SPORT_KEY, activeLeague), renderPlayersToday(activeLeague)]),
   stats: () => Promise.resolve(),
 };
 
@@ -877,7 +912,7 @@ function initDateSearch() {
 
 async function loadMainContent() {
   resetStatsSearch();
-  activeLeague = LEAGUE_KEY;
+  activeLeague = readStoredLeague();
   updateLeagueChrome();
   const dateFilterInput = document.getElementById('games-date-input');
   if (dateFilterInput) dateFilterInput.value = '';

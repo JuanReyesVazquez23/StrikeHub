@@ -41,7 +41,7 @@ https://strikehub.onrender.com (Render Free Plan)
 - ❤️ Equipos favoritos
 - 👤 Autenticación segura (JWT en cookie httpOnly)
 - 🌎 Español / English
-- 📰 Noticias de ESPN
+- 📰 Noticias (ESPN para la MLB; prensa dominicana para la LIDOM)
 - 🛠️ Panel de administración
 
 ---
@@ -66,7 +66,7 @@ https://strikehub.onrender.com (Render Free Plan)
 ### Datos
 
 - **MLB Stats API** (oficial, gratuita, sin key): equipos, partidos, posiciones, rosters y stats. Sirve a la MLB (`sportId=1`) y a la LIDOM (`sportId=17`, `leagueId=131`).
-- **ESPN RSS**: noticias con imagen
+- **ESPN RSS** (y prensa dominicana para la LIDOM): noticias con imagen
 
 ---
 
@@ -125,7 +125,7 @@ Made by Juan Reyes
 | Favoritos (equipo) | ✅ Completo |
 | **MLB** — posiciones, pitchers hoy, en vivo, resultados, estadísticas reales | ✅ Funcional de extremo a extremo (MLB Stats API, gratuita, sin key) |
 | **LIDOM** — posiciones, en vivo, resultados, estadísticas reales (selector de liga) | ✅ Funcional de extremo a extremo (misma MLB Stats API, `sportId=17`) |
-| Noticias ESPN (béisbol) | ✅ Funcional |
+| Noticias (ESPN para la MLB; prensa dominicana para la LIDOM) | ✅ Funcional |
 | Panel de administración (MLB y LIDOM) | ✅ Completo |
 | PWA / "instalar app" | ✅ Básico |
 

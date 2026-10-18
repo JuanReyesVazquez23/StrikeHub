@@ -25,6 +25,7 @@
     "playersToday": "Jugadores Hoy",
     "news": "Noticias",
     "generalNews": "Noticias Generales",
+    "newsLidom": "Noticias de la LIDOM",
     "liveAndResults": "En Vivo y Resultados",
     "liveNow": "En Vivo Ahora",
     "upcoming": "Próximos Partidos",
@@ -127,7 +128,7 @@
     "league": "Liga",
     "loading": "Cargando...",
     "error": "Ocurrió un error al cargar la información.",
-    "readMore": "Leer en ESPN",
+    "readMore": "Leer más",
     "source": "Fuente"
   }
 }

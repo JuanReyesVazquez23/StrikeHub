@@ -25,6 +25,7 @@
     "playersToday": "Players Today",
     "news": "News",
     "generalNews": "General News",
+    "newsLidom": "LIDOM News",
     "liveAndResults": "Live & Results",
     "liveNow": "Live Now",
     "upcoming": "Upcoming Games",
@@ -127,7 +128,7 @@
     "standingsUnavailable": "Standings for this league aren't available yet.",
     "loading": "Loading...",
     "error": "Something went wrong while loading data.",
-    "readMore": "Read on ESPN",
+    "readMore": "Read more",
     "source": "Source"
   }
 }
