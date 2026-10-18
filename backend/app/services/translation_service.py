@@ -1,11 +1,16 @@
 """
 Traducción automática de contenido (noticias, jugadas en vivo) al español.
 
-Se usa deep-translator con CADENA DE MOTORES (Google -> MyMemory): el
-endpoint gratuito de Google Translate suele bloquear IPs de datacenters
-(Render/Railway) con 429, lo que dejaba TODAS las noticias en inglés. Con
-el respaldo, si Google falla se intenta MyMemory (gratis, sin key) antes
-de rendirse al original en inglés.
+Se usa deep-translator con CADENA DE MOTORES (MyMemory -> Google):
+
+- MyMemory va primero porque es el único que funcionó de verdad. Ojo: exige
+  códigos de idioma con región ("en-GB"/"es-ES"); con "en"/"es" a secas
+  lanzaba LanguageNotSupportedException y el respaldo nunca servía.
+- Google queda de segundo: da mejor calidad de traducción, pero su endpoint
+  gratuito bloquea con 429 las IPs de datacenters (Render/Railway), así que
+  como primera opción dejaba todas las noticias en inglés.
+
+Si todos los motores fallan se devuelve None y quien llama usa el original.
 
 REGLA IMPORTANTE: nunca se traducen nombres propios (equipos, jugadores,
 ciudades, estadios) — nada de eso pasa por aquí. Solo texto libre como
@@ -22,18 +27,22 @@ logger = logging.getLogger("bfb.translation")
 # noticia nunca se acerca a esto, es solo una salvaguarda.
 MAX_TRANSLATABLE_CHARS = 4500
 
+# MyMemory exige el idioma con región (no acepta "en"/"es" a secas).
+MYMEMORY_SOURCE_LANG = "en-GB"
+MYMEMORY_TARGET_LANG = "es-ES"
+
+
+def _translate_via_mymemory(source_text: str) -> str | None:
+    return MyMemoryTranslator(source=MYMEMORY_SOURCE_LANG, target=MYMEMORY_TARGET_LANG).translate(source_text)
+
 
 def _translate_via_google(source_text: str) -> str | None:
     return GoogleTranslator(source="en", target="es").translate(source_text)
 
 
-def _translate_via_mymemory(source_text: str) -> str | None:
-    return MyMemoryTranslator(source="en", target="es").translate(source_text)
-
-
 def translate_to_spanish(text: str | None) -> str | None:
     """
-    Traduce un texto de inglés a español probando Google primero y MyMemory
+    Traduce un texto de inglés a español probando MyMemory primero y Google
     como respaldo. Si todo falla (motores caídos, límites excedidos, sin
     conexión), devuelve None en vez de lanzar una excepción — así un fallo
     de traducción nunca rompe la sincronización de noticias ni la consulta
@@ -43,7 +52,7 @@ def translate_to_spanish(text: str | None) -> str | None:
     if not text:
         return None
     source_snippet = text[:MAX_TRANSLATABLE_CHARS]
-    for provider_name, provider in (("google", _translate_via_google), ("mymemory", _translate_via_mymemory)):
+    for provider_name, provider in (("mymemory", _translate_via_mymemory), ("google", _translate_via_google)):
         try:
             translated_text = provider(source_snippet)
             if (
