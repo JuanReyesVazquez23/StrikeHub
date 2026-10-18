@@ -16,6 +16,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
+from app.core.logging_config import configure_logging
 from app.models.favorite import Favorite
 from app.models.prediction import Prediction
 from app.models.sport import ExcludedTeam, Game, League, NewsArticle, Player, Sport, Team
@@ -635,6 +636,24 @@ async def run_full_sync() -> None:
     resolve_finished_predictions()
 
 
+def main() -> int:
+    """
+    Punto de entrada del cron: sincroniza una sola vez y devuelve el código de
+    salida (0 = bien, 1 = falló). Render/la plataforma usa ese código para
+    marcar la corrida como exitosa o fallida.
+
+    Se registra el error de forma concisa en vez de dejar que Python imprima
+    todo el traceback: el cron no debe llenar los logs de ruido.
+    """
+    configure_logging()
+    try:
+        asyncio.run(run_full_sync())
+    except Exception:
+        logger.exception("La sincronización completa falló.")
+        return 1
+    logger.info("Sincronización completa terminada sin errores.")
+    return 0
+
+
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    asyncio.run(run_full_sync())
+    raise SystemExit(main())

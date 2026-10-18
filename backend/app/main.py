@@ -11,10 +11,11 @@ from fastapi.staticfiles import StaticFiles
 from app.api.routes import admin, auth, favorites, games, leagues, news, postseason, predictions, stats
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
+from app.core.logging_config import configure_logging
 from app.core.migrations import run_lightweight_migrations
 from app.services.sync_service import ensure_base_catalog, run_full_sync
 
-logging.basicConfig(level=logging.INFO)
+configure_logging()
 logger = logging.getLogger("bfb.main")
 
 BACKGROUND_SYNC_INTERVAL_SECONDS = 300  # 5 minutos
