@@ -13,10 +13,12 @@ import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.database import SessionLocal
+from app.core.database import Base, SessionLocal, engine
 from app.core.logging_config import configure_logging
+from app.core.migrations import run_lightweight_migrations
 from app.models.favorite import Favorite
 from app.models.prediction import Prediction
 from app.models.sport import ExcludedTeam, Game, League, NewsArticle, Player, Sport, Team
@@ -206,7 +208,31 @@ def season_schedule_window(reference_date: date) -> tuple[date, date]:
     return date(season_start_year, 9, 1), date(season_start_year + 1, 2, 28)
 
 
-async def sync_league_games(league_key: str, api_config: StatsApiLeagueConfig, target_date: date | None = None) -> None:
+async def sync_league_games(
+    league_key: str, api_config: StatsApiLeagueConfig, target_date: date | None = None
+) -> None:
+    """
+    Sincroniza el calendario de una liga, reintentando una vez si otro proceso
+    se le adelantó.
+
+    El cron y el sincronizador del sitio comparten base de datos, así que
+    pueden intentar insertar el mismo partido nuevo al mismo tiempo. El que
+    pierde la carrera recibe IntegrityError al confirmar; en el reintento ese
+    partido ya existe y solo se actualiza, en vez de tumbar la corrida entera.
+    """
+    try:
+        await _sync_league_games_once(league_key, api_config, target_date)
+    except IntegrityError:
+        logger.warning(
+            "El calendario de '%s' chocó con otra sincronización en curso; se reintenta una vez.",
+            league_key,
+        )
+        await _sync_league_games_once(league_key, api_config, target_date)
+
+
+async def _sync_league_games_once(
+    league_key: str, api_config: StatsApiLeagueConfig, target_date: date | None = None
+) -> None:
     db = SessionLocal()
     try:
         league = db.query(League).filter(League.key == league_key).first()
@@ -695,6 +721,25 @@ async def run_full_sync() -> None:
     resolve_finished_predictions()
 
 
+def _prepare_database() -> None:
+    """
+    Deja el esquema listo para sincronizar aunque la base esté vacía.
+
+    El servidor web crea las tablas al arrancar, pero el cron corre en su
+    propio proceso: con una base recién creada (ej. el Postgres gratuito de
+    Render expira a los 30 días y se reemplaza) antes fallaba con
+    "no such table: sports" y no sincronizaba nada. Crear tablas es
+    idempotente, así que no molesta cuando la base ya está lista.
+    """
+    Base.metadata.create_all(bind=engine)
+
+    # Los parches de columnas usan sintaxis de Postgres (ADD COLUMN IF NOT
+    # EXISTS). En una base nueva create_all ya trae el esquema completo, así
+    # que solo se aplican cuando el motor los soporta.
+    if engine.dialect.name == "postgresql":
+        run_lightweight_migrations(engine)
+
+
 def main() -> int:
     """
     Punto de entrada del cron: sincroniza una sola vez y devuelve el código de
@@ -706,6 +751,7 @@ def main() -> int:
     """
     configure_logging()
     try:
+        _prepare_database()
         asyncio.run(run_full_sync())
     except Exception:
         logger.exception("La sincronización completa falló.")

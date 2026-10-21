@@ -13,7 +13,11 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from sqlalchemy import create_engine, inspect
+from sqlalchemy.exc import IntegrityError
+
 from app.services import mlb_service  # noqa: E402
+from app.services import sync_service  # noqa: E402
 from app.services.mlb_service import LIDOM_API_CONFIG, MLB_API_CONFIG  # noqa: E402
 from app.services.sync_service import season_schedule_window  # noqa: E402
 
@@ -112,6 +116,68 @@ class ScheduleRangeTest(unittest.TestCase):
     def test_la_mlb_no_manda_filtro_de_liga(self):
         asyncio.run(mlb_service.get_schedule_range(date(2026, 10, 20), date(2026, 10, 20), MLB_API_CONFIG))
         self.assertNotIn("leagueId", FakeAsyncClient.last_request_params)
+
+
+class LeagueScheduleRaceTest(unittest.TestCase):
+    """
+    El cron y el sincronizador del sitio comparten base de datos: si los dos
+    intentan crear el mismo partido nuevo, el que pierde la carrera no debe
+    tumbar la corrida.
+    """
+
+    def test_reintenta_una_vez_si_choca_con_otra_sincronizacion(self):
+        corridas = []
+
+        async def sincronizacion_falsa(*args, **kwargs):
+            corridas.append(args)
+            if len(corridas) == 1:
+                raise IntegrityError("INSERT INTO games", {}, Exception("duplicate key"))
+
+        with mock.patch.object(sync_service, "_sync_league_games_once", sincronizacion_falsa):
+            asyncio.run(sync_service.sync_league_games("mlb", MLB_API_CONFIG))
+
+        self.assertEqual(len(corridas), 2)
+
+    def test_no_reintenta_si_el_error_es_otro(self):
+        corridas = []
+
+        async def sincronizacion_falsa(*args, **kwargs):
+            corridas.append(args)
+            raise RuntimeError("la API se cayó")
+
+        with mock.patch.object(sync_service, "_sync_league_games_once", sincronizacion_falsa):
+            with self.assertRaises(RuntimeError):
+                asyncio.run(sync_service.sync_league_games("mlb", MLB_API_CONFIG))
+
+        self.assertEqual(len(corridas), 1)
+
+
+class CronEntryPointTest(unittest.TestCase):
+    """El cron debe poder arrancar sobre una base vacía, no solo sobre una ya migrada."""
+
+    def test_prepara_la_base_antes_de_sincronizar(self):
+        orden = []
+
+        with (
+            mock.patch.object(sync_service, "_prepare_database", lambda: orden.append("base")),
+            mock.patch.object(
+                sync_service, "run_full_sync", mock.AsyncMock(side_effect=lambda: orden.append("sync"))
+            ),
+        ):
+            exit_code = sync_service.main()
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(orden, ["base", "sync"])
+
+    def test_prepara_una_base_vacia_crea_el_esquema(self):
+        base_vacia = create_engine("sqlite://")
+
+        with mock.patch.object(sync_service, "engine", base_vacia):
+            sync_service._prepare_database()
+
+        tablas = inspect(base_vacia).get_table_names()
+        self.assertIn("sports", tablas)
+        self.assertIn("games", tablas)
 
 
 if __name__ == "__main__":
