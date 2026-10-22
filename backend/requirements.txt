@@ -1,9 +1,14 @@
 fastapi==0.115.6
 uvicorn[standard]==0.30.6
-sqlalchemy==2.0.35
+# Versiones con ruedas para Python 3.14: pydantic 2.9.2 arrastraba
+# pydantic-core 2.23.4, que no publica rueda cp314 y obliga a compilar Rust
+# (falla sin Visual Studio Build Tools). pydantic 2.14.1 usa pydantic-core
+# 2.50.1, que sí trae ruedas cp314. SQLAlchemy se sube dentro de la misma
+# rama 2.0 por el mismo motivo: 2.0.35 tampoco tiene cp314.
+sqlalchemy==2.0.55
 psycopg2-binary==2.9.12
-pydantic[email]==2.9.2
-pydantic-settings==2.5.2
+pydantic[email]==2.14.1
+pydantic-settings==2.16.1
 # python-jose eliminado por CVE-2024-33663 (confusión de algoritmo) y
 # CVE-2024-33664 (JWT-bomb DoS), además de estar abandonado desde 2022.
 # Se usa PyJWT, mantenido y sin esos vectores.

@@ -144,6 +144,8 @@ Made by Juan Reyes
 
 ## Cómo ejecutarlo localmente
 
+Requiere **Python 3.14** (la misma versión que fija `render.yaml`).
+
 ```bash
 createdb bfb_deportes
 cd backend

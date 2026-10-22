@@ -11,14 +11,16 @@ services:
       - key: ENV
         value: production
       # Se fuerza explícitamente la versión de Python: el archivo
-      # .python-version no se respetó (Render usó 3.14 por defecto) y
-      # psycopg2-binary quedó roto contra esa versión tan nueva
-      # (ImportError: undefined symbol _PyInterpreterState_Get -- típico
-      # de incompatibilidad de ABI en versiones de Python recién salidas).
-      # PYTHON_VERSION es la forma más autoritativa de fijarla según la
-      # propia documentación de Render.
+      # .python-version no siempre se respeta en Render (en su momento usó
+      # 3.14 por defecto y rompió psycopg2-binary por un cambio de ABI).
+      # Ahora se fija la misma versión que se usa en desarrollo (3.14.x).
+      # El bloqueo anterior con 3.14 venía de pydantic-core, que no tenía
+      # rueda para esa versión y trataba de compilar Rust; con pydantic
+      # 2.14.1 (pydantic-core 2.50.1) y psycopg2-binary 2.9.12 ya hay
+      # ruedas cp314 y no se compila nada. PYTHON_VERSION exige la versión
+      # completa (mayor.menor.parche).
       - key: PYTHON_VERSION
-        value: 3.12.8
+        value: 3.14.9
       # Secretos: se pegan manualmente en el Dashboard de Render (Environment),
       # nunca se escriben aquí ni se suben al repositorio.
       - key: DATABASE_URL
