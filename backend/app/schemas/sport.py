@@ -77,12 +77,15 @@ class GameOut(BaseModel):
     home_win_probability: float | None
     venue: str | None
     period_status: str | None
+    # El detalle del deporte (pitchers ganador/perdedor/salvamento, goleadores,
+    # etc.) viaja también en la lista y no solo en el detalle del juego: así la
+    # tarjeta de un partido finalizado puede mostrarlo sin pedir un juego por
+    # juego. Es un dict pequeño.
+    details: dict | None = None
 
 
 class GameDetailOut(GameOut):
-    """Incluye el detalle específico del deporte (pitcher ganador, boxscore, goleadores...)."""
-
-    details: dict | None
+    """Detalle completo de un juego (incluye 'details', igual que la lista)."""
 
 
 class NewsOut(BaseModel):
