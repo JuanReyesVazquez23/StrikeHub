@@ -107,11 +107,41 @@ function initLeagueSelector() {
   });
 }
 
+// Fecha y hora completas (se usa en las noticias), siempre en formato de 12 horas.
 function formatDate(isoTimestamp) {
   return new Date(isoTimestamp).toLocaleString(i18nState.lang === 'es' ? 'es-ES' : 'en-US', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
   });
+}
+
+// Hora del partido en formato de 12 horas ("7:10 p. m."). Si el partido no es
+// de hoy, se le antepone el dia para no perder la fecha en la lista de proximos
+// (con includeDay en false se muestra solo la hora, ej. al filtrar por fecha).
+function formatGameTime(isoTimestamp, { includeDay = true } = {}) {
+  const gameDate = new Date(isoTimestamp);
+  if (Number.isNaN(gameDate.getTime())) return '';
+
+  const locale = i18nState.lang === 'es' ? 'es-ES' : 'en-US';
+  const timeLabel = gameDate.toLocaleTimeString(locale, {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+
+  const today = new Date();
+  const isToday =
+    gameDate.getFullYear() === today.getFullYear() &&
+    gameDate.getMonth() === today.getMonth() &&
+    gameDate.getDate() === today.getDate();
+  if (isToday || !includeDay) return timeLabel;
+
+  const dayLabel = gameDate.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short' });
+  return `${dayLabel} · ${timeLabel}`;
 }
 
 /* ---------------------- Posiciones ---------------------- */
@@ -332,7 +362,7 @@ function renderTicker(scheduledGames) {
   const tickerItems = scheduledGames
     .map((scheduledGame) => {
       const isFinalGame = scheduledGame.status === 'final';
-      const scoreLabel = scheduledGame.status === 'scheduled' ? formatDate(scheduledGame.start_time) : `${scheduledGame.home_score ?? 0}-${scheduledGame.away_score ?? 0}`;
+      const scoreLabel = scheduledGame.status === 'scheduled' ? formatGameTime(scheduledGame.start_time) : `${scheduledGame.home_score ?? 0}-${scheduledGame.away_score ?? 0}`;
       const awayLogoHtml = scheduledGame.away_team.logo_url ? `<img src="${esc(safeImg(scheduledGame.away_team.logo_url))}" alt="" class="ticker-logo" loading="lazy" decoding="async">` : '';
       const homeLogoHtml = scheduledGame.home_team.logo_url ? `<img src="${esc(safeImg(scheduledGame.home_team.logo_url))}" alt="" class="ticker-logo" loading="lazy" decoding="async">` : '';
       return `
@@ -355,14 +385,14 @@ function scoreDisplay(scheduledGame) {
   return `${scheduledGame.home_score ?? 0} : ${scheduledGame.away_score ?? 0}`;
 }
 
-async function renderGameCard(scheduledGame) {
+async function renderGameCard(scheduledGame, displayOptions = {}) {
   const predictionRowHtml = await renderPredictionRow(scheduledGame);
   const liveSituationSlot = scheduledGame.status === 'live' ? `<div class="live-situation-slot" data-game-id="${Number(scheduledGame.id)}"></div>` : '';
   return `
     <div class="game-card">
       <div class="game-top-row">
         ${gameStatusLabel(scheduledGame)}
-        <span class="game-status">${esc(formatDate(scheduledGame.start_time))}</span>
+        <span class="game-status">${esc(formatGameTime(scheduledGame.start_time, displayOptions))}</span>
       </div>
       <div class="scoreboard-row">
         <div class="team-block home">
@@ -383,9 +413,9 @@ async function renderGameCard(scheduledGame) {
     </div>`;
 }
 
-async function renderGameGroup(titleKey, groupedGames) {
+async function renderGameGroup(titleKey, groupedGames, displayOptions = {}) {
   if (!groupedGames.length) return '';
-  const gameCards = await Promise.all(groupedGames.map(renderGameCard));
+  const gameCards = await Promise.all(groupedGames.map((groupedGame) => renderGameCard(groupedGame, displayOptions)));
   return `
     <h3 class="game-group-title">${t(titleKey)}</h3>
     ${gameCards.join('')}`;
@@ -518,10 +548,12 @@ async function renderCalendarSection(leagueKey, specificDate = null) {
 
     const upcomingGames = visibleGames.filter((visibleGame) => visibleGame.status === 'scheduled');
     const finalGames = visibleGames.filter((visibleGame) => visibleGame.status === 'final');
+    // Con una fecha elegida, el dia ya se ve en el filtro: no se repite en cada tarjeta.
+    const displayOptions = { includeDay: !specificDate };
     const gameGroupsHtml = specificDate
-      ? (await renderGameGroup('sections.finished', finalGames)) +
-        (await renderGameGroup('sections.upcoming', upcomingGames))
-      : await renderGameGroup('sections.upcoming', upcomingGames);
+      ? (await renderGameGroup('sections.finished', finalGames, displayOptions)) +
+        (await renderGameGroup('sections.upcoming', upcomingGames, displayOptions))
+      : await renderGameGroup('sections.upcoming', upcomingGames, displayOptions);
 
     calendarContainer.innerHTML = gameGroupsHtml || `<p class="empty-state">${t('common.noGamesToday')}</p>`;
     attachPredictionHandlers(calendarContainer);
