@@ -211,14 +211,16 @@ def season_schedule_window(reference_date: date) -> tuple[date, date]:
 
 def _dates_with_missing_decisions(db: Session, league: League) -> set[date]:
     """
-    Fechas de los ultimos 7 dias con partidos finalizados a los que les falta el
+    Fechas de los ultimos 14 dias con partidos finalizados a los que les falta el
     pitcher ganador en 'details'.
 
-    Sirve para rellenarlos: un partido de hace dos dias ya salio de la ventana
-    de sincronizacion (ayer/hoy/manana) y, si en su momento no se guardo la
-    decision, se quedaria para siempre sin ganador ni perdedor. Los partidos sin
-    decision oficial (empates, suspendidos) tambien caen aqui, pero el limite de
-    7 dias evita pedirlos indefinidamente.
+    Sirve para rellenarlos: un partido de hace varios dias ya salio de la
+    ventana de sincronizacion (ayer/hoy/manana) y, si en su momento no se guardo
+    la decision, se quedaria para siempre sin ganador ni perdedor. Solo se piden
+    las fechas de partidos que nunca se procesaron como finalizados; si la clave
+    'winning_pitcher' ya existe (aunque sea null, ej. un juego suspendido o un
+    empate sin decision oficial) no se vuelve a pedir, asi que el gasto extra de
+    peticiones se apaga solo.
     """
     recent_finished_games = (
         db.query(Game)
@@ -227,11 +229,11 @@ def _dates_with_missing_decisions(db: Session, league: League) -> set[date]:
         .limit(60)
         .all()
     )
-    oldest_date = datetime.now(timezone.utc).date() - timedelta(days=7)
+    oldest_date = datetime.now(timezone.utc).date() - timedelta(days=14)
     return {
         finished_game.start_time.date()
         for finished_game in recent_finished_games
-        if not (finished_game.details or {}).get("winning_pitcher")
+        if "winning_pitcher" not in (finished_game.details or {})
         and finished_game.start_time.date() >= oldest_date
     }
 

@@ -267,12 +267,12 @@ class GameDetailsPersistenceTest(unittest.TestCase):
 
 
     def test_detecta_finalizados_recientes_sin_decisiones(self):
-        """Los partidos de los ultimos 7 dias sin ganador se vuelven a pedir; los viejos no."""
+        """Se piden las fechas de finalizados que nunca se procesaron; no las ya procesadas ni las viejas."""
         home_team = self.db.query(Team).filter_by(external_id="1").one()
         away_team = self.db.query(Team).filter_by(external_id="2").one()
         hoy = datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
         ayer = hoy - timedelta(days=1)
-        hace_un_mes = hoy - timedelta(days=30)
+        hace_dos_meses = hoy - timedelta(days=60)
 
         def agregar_finalizado(external_id, start_time, details):
             self.db.add(
@@ -287,9 +287,10 @@ class GameDetailsPersistenceTest(unittest.TestCase):
                 )
             )
 
-        agregar_finalizado("1", ayer, {"home_pitcher": "Abridor"})  # sin ganador
-        agregar_finalizado("2", ayer, {"winning_pitcher": "Ganador Real"})  # completo
-        agregar_finalizado("3", hace_un_mes, {"home_pitcher": "Abridor"})  # fuera de la ventana
+        agregar_finalizado("1", ayer, {"home_pitcher": "Abridor"})  # nunca procesado como final
+        agregar_finalizado("2", ayer, {"winning_pitcher": "Ganador Real"})  # ya tiene decision
+        agregar_finalizado("3", hace_dos_meses, {"home_pitcher": "Abridor"})  # fuera de la ventana
+        agregar_finalizado("4", ayer, {"winning_pitcher": None, "losing_pitcher": None})  # sin decision oficial
         self.db.commit()
 
         self.assertEqual(
