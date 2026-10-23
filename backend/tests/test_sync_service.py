@@ -7,7 +7,7 @@ Ejecutar desde backend/:
 import asyncio
 import sys
 import unittest
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -15,7 +15,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
+from app.core.database import Base  # noqa: E402
+from app.models.sport import Game, League, Sport, Team  # noqa: E402
 from app.services import mlb_service  # noqa: E402
 from app.services import sync_service  # noqa: E402
 from app.services.mlb_service import LIDOM_API_CONFIG, MLB_API_CONFIG  # noqa: E402
@@ -178,6 +181,121 @@ class CronEntryPointTest(unittest.TestCase):
         tablas = inspect(base_vacia).get_table_names()
         self.assertIn("sports", tablas)
         self.assertIn("games", tablas)
+
+
+class GameDetailsPersistenceTest(unittest.TestCase):
+    """
+    Un partido que ya existia en la BD como programado debe guardar el ganador
+    y el perdedor cuando la API lo da por finalizado. El detalle vive en una
+    columna JSON, y mutarla en sitio no la marca como modificada: si eso se
+    rompe otra vez, el partido queda finalizado pero sin decisiones.
+    """
+
+    def setUp(self):
+        self.engine_db = create_engine("sqlite://")
+        Base.metadata.create_all(self.engine_db)
+        self.db = Session(self.engine_db)
+
+        sport = Sport(key="baseball", name_es="Béisbol", name_en="Baseball")
+        self.db.add(sport)
+        self.db.flush()
+        self.league = League(sport_id=sport.id, key="lidom", name="LIDOM", data_provider="mlb_stats_api")
+        self.db.add(self.league)
+        self.db.flush()
+        self.db.add_all(
+            [
+                Team(league_id=self.league.id, external_id="1", name="Home"),
+                Team(league_id=self.league.id, external_id="2", name="Away"),
+            ]
+        )
+        self.db.commit()
+
+    def tearDown(self):
+        self.db.close()
+        self.engine_db.dispose()
+
+    @staticmethod
+    def _schedule(abstract_state, decisions=None):
+        game = {
+            "gamePk": 851440,
+            "gameDate": "2026-10-21T23:30:00Z",
+            "status": {"abstractGameState": abstract_state, "detailedState": abstract_state},
+            "teams": {
+                "home": {
+                    "team": {"id": 1, "name": "Home"},
+                    "score": 5,
+                    "probablePitcher": {"fullName": "Abridor Local"},
+                },
+                "away": {
+                    "team": {"id": 2, "name": "Away"},
+                    "score": 3,
+                    "probablePitcher": {"fullName": "Abridor Visitante"},
+                },
+            },
+            "venue": {"name": "Estadio Quisqueya"},
+            "linescore": {"currentInning": 9},
+        }
+        if decisions:
+            game["decisions"] = decisions
+        return {"dates": [{"games": [game]}]}
+
+    def test_guarda_decisiones_cuando_el_juego_ya_existia_y_termina(self):
+        sync_service._upsert_games_from_schedule(self.db, self.league, self._schedule("Preview"))
+        self.db.commit()
+
+        sync_service._upsert_games_from_schedule(
+            self.db,
+            self.league,
+            self._schedule(
+                "Final",
+                decisions={
+                    "winner": {"fullName": "Ganador Real"},
+                    "loser": {"fullName": "Perdedor Real"},
+                    "save": {"fullName": "Salvador Real"},
+                },
+            ),
+        )
+        self.db.commit()
+        self.db.expire_all()
+
+        game = self.db.query(Game).one()
+        self.assertEqual(game.status, "final")
+        self.assertEqual(game.details["winning_pitcher"], "Ganador Real")
+        self.assertEqual(game.details["losing_pitcher"], "Perdedor Real")
+        self.assertEqual(game.details["save_pitcher"], "Salvador Real")
+        self.assertEqual(game.details["innings_played"], 9)
+
+
+    def test_detecta_finalizados_recientes_sin_decisiones(self):
+        """Los partidos de los ultimos 7 dias sin ganador se vuelven a pedir; los viejos no."""
+        home_team = self.db.query(Team).filter_by(external_id="1").one()
+        away_team = self.db.query(Team).filter_by(external_id="2").one()
+        hoy = datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
+        ayer = hoy - timedelta(days=1)
+        hace_un_mes = hoy - timedelta(days=30)
+
+        def agregar_finalizado(external_id, start_time, details):
+            self.db.add(
+                Game(
+                    league_id=self.league.id,
+                    external_id=external_id,
+                    home_team_id=home_team.id,
+                    away_team_id=away_team.id,
+                    start_time=start_time,
+                    status="final",
+                    details=details,
+                )
+            )
+
+        agregar_finalizado("1", ayer, {"home_pitcher": "Abridor"})  # sin ganador
+        agregar_finalizado("2", ayer, {"winning_pitcher": "Ganador Real"})  # completo
+        agregar_finalizado("3", hace_un_mes, {"home_pitcher": "Abridor"})  # fuera de la ventana
+        self.db.commit()
+
+        self.assertEqual(
+            sync_service._dates_with_missing_decisions(self.db, self.league),
+            {ayer.date()},
+        )
 
 
 if __name__ == "__main__":

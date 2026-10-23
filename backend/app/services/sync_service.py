@@ -15,6 +15,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.database import Base, SessionLocal, engine
 from app.core.logging_config import configure_logging
@@ -208,6 +209,33 @@ def season_schedule_window(reference_date: date) -> tuple[date, date]:
     return date(season_start_year, 9, 1), date(season_start_year + 1, 2, 28)
 
 
+def _dates_with_missing_decisions(db: Session, league: League) -> set[date]:
+    """
+    Fechas de los ultimos 7 dias con partidos finalizados a los que les falta el
+    pitcher ganador en 'details'.
+
+    Sirve para rellenarlos: un partido de hace dos dias ya salio de la ventana
+    de sincronizacion (ayer/hoy/manana) y, si en su momento no se guardo la
+    decision, se quedaria para siempre sin ganador ni perdedor. Los partidos sin
+    decision oficial (empates, suspendidos) tambien caen aqui, pero el limite de
+    7 dias evita pedirlos indefinidamente.
+    """
+    recent_finished_games = (
+        db.query(Game)
+        .filter(Game.league_id == league.id, Game.status == "final")
+        .order_by(Game.start_time.desc())
+        .limit(60)
+        .all()
+    )
+    oldest_date = datetime.now(timezone.utc).date() - timedelta(days=7)
+    return {
+        finished_game.start_time.date()
+        for finished_game in recent_finished_games
+        if not (finished_game.details or {}).get("winning_pitcher")
+        and finished_game.start_time.date() >= oldest_date
+    }
+
+
 async def sync_league_games(
     league_key: str, api_config: StatsApiLeagueConfig, target_date: date | None = None
 ) -> None:
@@ -259,6 +287,11 @@ async def _sync_league_games_once(
             for live_game in db.query(Game).filter(Game.league_id == league.id, Game.status == "live").all()
         }
         dates_to_sync |= orphaned_live_game_dates
+
+        # Auto-corrección: partidos finalizados recientes que quedaron sin
+        # ganador guardado (pasó mientras el detalle JSON no se persistía al
+        # actualizar un juego que ya existía). Se vuelven a pedir sus fechas.
+        dates_to_sync |= _dates_with_missing_decisions(db, league)
 
         for sync_date in sorted(dates_to_sync):
             daily_schedule = await mlb_service.get_schedule(sync_date, api_config)
@@ -367,7 +400,7 @@ def _upsert_games_from_schedule(db, league, daily_schedule: dict) -> None:
                     home_team.win_pct or 0.5, away_team.win_pct or 0.5, home_recent_form, away_recent_form
                 )
 
-            game_details = game.details or {}
+            game_details = dict(game.details or {})
             if game.status == "scheduled":
                 game_details.update(mlb_service.extract_probable_pitchers(schedule_game))
             elif game.status == "final":
@@ -378,6 +411,12 @@ def _upsert_games_from_schedule(db, league, daily_schedule: dict) -> None:
                 linescore_data = schedule_game.get("linescore", {})
                 game.period_status = f"Inning {linescore_data.get('currentInning', '?')}"
             game.details = game_details
+            # SQLAlchemy no detecta cambios hechos DENTRO de una columna JSON
+            # (mutarla en sitio no la marca como modificada). Sin este aviso, el
+            # UPDATE no incluye 'details' y un partido que pasa de programado a
+            # finalizado se quedaba con los pitchers probables para siempre, sin
+            # ganador ni perdedor.
+            flag_modified(game, "details")
             game.last_synced_at = datetime.now(timezone.utc)
 
 
