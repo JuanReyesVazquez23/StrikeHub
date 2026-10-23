@@ -47,6 +47,11 @@ CURRENT_SEASON = datetime.now(timezone.utc).year
 # ciclo de sincronización.
 FULL_SCHEDULE_MIN_UPCOMING_GAMES = 15
 
+# La MLB Stats API da estos partidos como abstractGameState "Final" aunque no se
+# hayan jugado (sin marcador y sin decisiones). Se guardan con su propio estado
+# para no mostrarlos como un partido finalizado.
+POSTPONED_DETAILED_STATES = {"Postponed", "Suspended"}
+
 
 def _get_or_create_sport(db: Session, sport_key: str, spanish_name: str, english_name: str) -> Sport:
     sport = db.query(Sport).filter(Sport.key == sport_key).first()
@@ -209,17 +214,22 @@ def season_schedule_window(reference_date: date) -> tuple[date, date]:
     return date(season_start_year, 9, 1), date(season_start_year + 1, 2, 28)
 
 
-def _dates_with_missing_decisions(db: Session, league: League) -> set[date]:
+def _dates_with_stale_final_games(db: Session, league: League) -> set[date]:
     """
-    Fechas de los ultimos 14 dias con partidos finalizados a los que les falta el
-    pitcher ganador en 'details'.
+    Fechas de los ultimos 14 dias con partidos guardados como finalizados pero
+    incompletos: o no tienen el pitcher ganador en 'details', o no tienen
+    marcador.
 
-    Sirve para rellenarlos: un partido de hace varios dias ya salio de la
+    Sirve para corregirlos: un partido de hace varios dias ya salio de la
     ventana de sincronizacion (ayer/hoy/manana) y, si en su momento no se guardo
-    la decision, se quedaria para siempre sin ganador ni perdedor. Solo se piden
-    las fechas de partidos que nunca se procesaron como finalizados; si la clave
-    'winning_pitcher' ya existe (aunque sea null, ej. un juego suspendido o un
-    empate sin decision oficial) no se vuelve a pedir, asi que el gasto extra de
+    la decision, se quedaria para siempre sin ganador ni perdedor. Lo mismo con
+    un partido que la API dio como suspendido o aplazado (abstractGameState
+    'Final' sin marcador): asi pasa a 'postponed' aunque ya haya pasado su
+    fecha.
+
+    Solo se piden las fechas que siguen incompletas. Si la clave
+    'winning_pitcher' ya existe (aunque sea null, ej. un empate sin decision
+    oficial) y hay marcador, la fecha deja de pedirse, asi que el gasto extra de
     peticiones se apaga solo.
     """
     recent_finished_games = (
@@ -233,8 +243,12 @@ def _dates_with_missing_decisions(db: Session, league: League) -> set[date]:
     return {
         finished_game.start_time.date()
         for finished_game in recent_finished_games
-        if "winning_pitcher" not in (finished_game.details or {})
-        and finished_game.start_time.date() >= oldest_date
+        if finished_game.start_time.date() >= oldest_date
+        and (
+            "winning_pitcher" not in (finished_game.details or {})
+            or finished_game.home_score is None
+            or finished_game.away_score is None
+        )
     }
 
 
@@ -290,10 +304,11 @@ async def _sync_league_games_once(
         }
         dates_to_sync |= orphaned_live_game_dates
 
-        # Auto-corrección: partidos finalizados recientes que quedaron sin
-        # ganador guardado (pasó mientras el detalle JSON no se persistía al
-        # actualizar un juego que ya existía). Se vuelven a pedir sus fechas.
-        dates_to_sync |= _dates_with_missing_decisions(db, league)
+        # Auto-corrección: partidos guardados como finalizados pero incompletos
+        # (sin ganador, o sin marcador porque la API los dio como suspendidos o
+        # aplazados) se vuelven a pedir para completarlos o para marcar su
+        # estado real.
+        dates_to_sync |= _dates_with_stale_final_games(db, league)
 
         for sync_date in sorted(dates_to_sync):
             daily_schedule = await mlb_service.get_schedule(sync_date, api_config)
@@ -388,8 +403,11 @@ def _upsert_games_from_schedule(db, league, daily_schedule: dict) -> None:
                 db.flush()
 
             raw_status = schedule_game.get("status", {}).get("abstractGameState", "Preview")
+            detailed_status = schedule_game.get("status", {}).get("detailedState", "")
             status_mapping = {"Preview": "scheduled", "Live": "live", "Final": "final"}
             game.status = status_mapping.get(raw_status, "scheduled")
+            if detailed_status in POSTPONED_DETAILED_STATES:
+                game.status = "postponed"
 
             game.home_score = _extract_team_runs(schedule_game, "home")
             game.away_score = _extract_team_runs(schedule_game, "away")

@@ -16,7 +16,7 @@ router = APIRouter(tags=["games"])
 def list_games(
     league_key: str = Path(pattern=r"^[a-z0-9_]{1,40}$"),
     game_date: date | None = Query(default=None, description="Fecha exacta (YYYY-MM-DD). Si no se da, usa una ventana de 24h."),
-    status_filter: str | None = Query(default=None, alias="status", pattern="^(live|final|scheduled)$"),
+    status_filter: str | None = Query(default=None, alias="status", pattern="^(live|final|scheduled|postponed)$"),
     limit: int = Query(default=200, ge=1, le=500),
     db: Session = Depends(get_db),
 ):

@@ -21,7 +21,7 @@
  * con img-src. Además nunca se cacheaban aquí: una request no-cors
  * devuelve response opaca y `res.ok` es false.
  */
-const CACHE_VERSION = '20261022b';
+const CACHE_VERSION = '20261022c';
 const CACHE = `strikehub-v${CACHE_VERSION}`;
 
 const SHELL = [

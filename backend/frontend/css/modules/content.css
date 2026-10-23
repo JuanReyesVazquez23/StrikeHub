@@ -637,6 +637,11 @@
   text-shadow: 0 0 8px rgba(46, 204, 113, 0.5);
 }
 
+/* Partido aplazado: se distingue de "Final" (ese sí se jugó). */
+.game-status.postponed {
+  color: var(--bfb-yellow);
+}
+
 .scoreboard-row {
   display: grid;
   grid-template-columns: 1fr auto 1fr;

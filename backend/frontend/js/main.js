@@ -270,6 +270,7 @@ function gameStatusLabel(scheduledGame) {
     return `<span class="game-status live">● ${t('game.live')}${periodSuffix}</span>`;
   }
   if (scheduledGame.status === 'final') return `<span class="game-status">${t('game.final')}</span>`;
+  if (scheduledGame.status === 'postponed') return `<span class="game-status postponed">${t('game.postponed')}</span>`;
   return `<span class="game-status">${t('game.scheduled')}</span>`;
 }
 
@@ -352,6 +353,12 @@ function estimateLossPoints(probability) {
   return Math.round(Math.max(MIN_POINTS, Math.min(MAX_POINTS, points)));
 }
 
+function gameScoreLabel(scheduledGame) {
+  if (scheduledGame.status === 'scheduled') return formatGameTime(scheduledGame.start_time);
+  if (scheduledGame.status === 'postponed') return t('game.postponed');
+  return `${scheduledGame.home_score ?? 0}-${scheduledGame.away_score ?? 0}`;
+}
+
 function renderTicker(scheduledGames) {
   const tickerTrack = document.getElementById('ticker-track');
   if (!scheduledGames || !scheduledGames.length) {
@@ -362,7 +369,7 @@ function renderTicker(scheduledGames) {
   const tickerItems = scheduledGames
     .map((scheduledGame) => {
       const isFinalGame = scheduledGame.status === 'final';
-      const scoreLabel = scheduledGame.status === 'scheduled' ? formatGameTime(scheduledGame.start_time) : `${scheduledGame.home_score ?? 0}-${scheduledGame.away_score ?? 0}`;
+      const scoreLabel = gameScoreLabel(scheduledGame);
       const awayLogoHtml = scheduledGame.away_team.logo_url ? `<img src="${esc(safeImg(scheduledGame.away_team.logo_url))}" alt="" class="ticker-logo" loading="lazy" decoding="async">` : '';
       const homeLogoHtml = scheduledGame.home_team.logo_url ? `<img src="${esc(safeImg(scheduledGame.home_team.logo_url))}" alt="" class="ticker-logo" loading="lazy" decoding="async">` : '';
       return `
@@ -381,7 +388,7 @@ function scoreDisplay(scheduledGame) {
   // No mostrar marcador numérico en partidos que aún no comienzan: la API
   // devuelve 0 (no null) para esos casos, y 0-0 se confundía con un
   // partido realmente empatado en 0. Se decide por el status, no por el valor.
-  if (scheduledGame.status === 'scheduled') return 'VS';
+  if (scheduledGame.status === 'scheduled' || scheduledGame.status === 'postponed') return 'VS';
   return `${scheduledGame.home_score ?? 0} : ${scheduledGame.away_score ?? 0}`;
 }
 
@@ -502,7 +509,13 @@ async function fetchDisplayGames(leagueKey, specificDate = null) {
   // cada juego (sin mutar el original). Así toda la lógica de abajo
   // (etiqueta, si se muestra el diamante, agrupación) es consistente, sin
   // importar qué status haya quedado guardado por error en el backend.
-  const visibleGames = isHistoricalSearch ? scheduledGames.map((visibleGame) => ({ ...visibleGame, status: 'final' })) : scheduledGames;
+  // Los aplazados se respetan: no se jugaron, así que no deben aparecer como
+  // finalizados.
+  const visibleGames = isHistoricalSearch
+    ? scheduledGames.map((visibleGame) =>
+        visibleGame.status === 'postponed' ? visibleGame : { ...visibleGame, status: 'final' },
+      )
+    : scheduledGames;
   return { visibleGames, isHistoricalSearch };
 }
 
@@ -515,8 +528,10 @@ async function renderLiveSection(leagueKey) {
 
     const liveGames = visibleGames.filter((visibleGame) => visibleGame.status === 'live');
     const finalGames = visibleGames.filter((visibleGame) => visibleGame.status === 'final');
+    // Los aplazados no se jugaron: van en su propio grupo, no con los finalizados.
+    const postponedGames = visibleGames.filter((visibleGame) => visibleGame.status === 'postponed');
 
-    if (!liveGames.length && !finalGames.length) {
+    if (!liveGames.length && !finalGames.length && !postponedGames.length) {
       gamesContainer.innerHTML = `<p class="empty-state">${t('common.noGamesToday')}</p>`;
       stopLivePolling();
       return;
@@ -524,7 +539,8 @@ async function renderLiveSection(leagueKey) {
 
     gamesContainer.innerHTML =
       (await renderGameGroup('sections.liveNow', liveGames)) +
-      (await renderGameGroup('sections.finished', finalGames));
+      (await renderGameGroup('sections.finished', finalGames)) +
+      (await renderGameGroup('sections.postponed', postponedGames));
     startLivePolling(liveGames.map((liveGame) => liveGame.id));
   } catch (_) {
     gamesContainer.innerHTML = `<p class="empty-state">${t('common.error')}</p>`;
@@ -548,12 +564,15 @@ async function renderCalendarSection(leagueKey, specificDate = null) {
 
     const upcomingGames = visibleGames.filter((visibleGame) => visibleGame.status === 'scheduled');
     const finalGames = visibleGames.filter((visibleGame) => visibleGame.status === 'final');
+    const postponedGames = visibleGames.filter((visibleGame) => visibleGame.status === 'postponed');
     // Con una fecha elegida, el dia ya se ve en el filtro: no se repite en cada tarjeta.
     const displayOptions = { includeDay: !specificDate };
     const gameGroupsHtml = specificDate
       ? (await renderGameGroup('sections.finished', finalGames, displayOptions)) +
-        (await renderGameGroup('sections.upcoming', upcomingGames, displayOptions))
-      : await renderGameGroup('sections.upcoming', upcomingGames, displayOptions);
+        (await renderGameGroup('sections.upcoming', upcomingGames, displayOptions)) +
+        (await renderGameGroup('sections.postponed', postponedGames, displayOptions))
+      : (await renderGameGroup('sections.upcoming', upcomingGames, displayOptions)) +
+        (await renderGameGroup('sections.postponed', postponedGames, displayOptions));
 
     calendarContainer.innerHTML = gameGroupsHtml || `<p class="empty-state">${t('common.noGamesToday')}</p>`;
     attachPredictionHandlers(calendarContainer);

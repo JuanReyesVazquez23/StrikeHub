@@ -30,6 +30,7 @@
     "liveNow": "En Vivo Ahora",
     "upcoming": "Próximos Partidos",
     "finished": "Finalizados",
+    "postponed": "Aplazados",
     "stats": "Estadísticas",
     "postseason": "Postemporada",
     "leaders": "Líderes"
@@ -63,6 +64,7 @@
   "game": {
     "live": "En vivo",
     "final": "Final",
+    "postponed": "Aplazado",
     "scheduled": "Programado",
     "ifWrong": "si falla",
     "details": "Ver detalle del partido",

@@ -30,6 +30,7 @@
     "liveNow": "Live Now",
     "upcoming": "Upcoming Games",
     "finished": "Finished",
+    "postponed": "Postponed games",
     "stats": "Statistics",
     "postseason": "Postseason",
     "leaders": "Leaders"
@@ -63,6 +64,7 @@
   "game": {
     "live": "Live",
     "final": "Final",
+    "postponed": "Postponed",
     "scheduled": "Scheduled",
     "ifWrong": "if wrong",
     "details": "View game details",

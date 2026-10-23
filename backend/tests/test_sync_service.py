@@ -215,11 +215,14 @@ class GameDetailsPersistenceTest(unittest.TestCase):
         self.engine_db.dispose()
 
     @staticmethod
-    def _schedule(abstract_state, decisions=None):
+    def _schedule(abstract_state, decisions=None, detailed_state=None):
         game = {
             "gamePk": 851440,
             "gameDate": "2026-10-21T23:30:00Z",
-            "status": {"abstractGameState": abstract_state, "detailedState": abstract_state},
+            "status": {
+                "abstractGameState": abstract_state,
+                "detailedState": detailed_state or abstract_state,
+            },
             "teams": {
                 "home": {
                     "team": {"id": 1, "name": "Home"},
@@ -265,16 +268,40 @@ class GameDetailsPersistenceTest(unittest.TestCase):
         self.assertEqual(game.details["save_pitcher"], "Salvador Real")
         self.assertEqual(game.details["innings_played"], 9)
 
+    def test_marca_como_aplazado_un_juego_que_la_api_da_por_final(self):
+        """Un juego Postponed llega con abstractGameState 'Final' (sin jugarse): no debe verse como finalizado."""
+        sync_service._upsert_games_from_schedule(
+            self.db,
+            self.league,
+            self._schedule("Final", detailed_state="Postponed"),
+        )
+        self.db.commit()
 
-    def test_detecta_finalizados_recientes_sin_decisiones(self):
-        """Se piden las fechas de finalizados que nunca se procesaron; no las ya procesadas ni las viejas."""
+        game = self.db.query(Game).one()
+        self.assertEqual(game.status, "postponed")
+        # Sin decisiones: el partido no se jugo.
+        self.assertNotIn("winning_pitcher", game.details)
+
+    def test_marca_como_aplazado_un_juego_suspendido(self):
+        sync_service._upsert_games_from_schedule(
+            self.db,
+            self.league,
+            self._schedule("Final", detailed_state="Suspended"),
+        )
+        self.db.commit()
+
+        self.assertEqual(self.db.query(Game).one().status, "postponed")
+
+    def test_detecta_finalizados_incompletos(self):
+        """Se piden las fechas de finalizados sin decision o sin marcador; no las ya completas ni las viejas."""
         home_team = self.db.query(Team).filter_by(external_id="1").one()
         away_team = self.db.query(Team).filter_by(external_id="2").one()
         hoy = datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
         ayer = hoy - timedelta(days=1)
+        anteayer = hoy - timedelta(days=2)
         hace_dos_meses = hoy - timedelta(days=60)
 
-        def agregar_finalizado(external_id, start_time, details):
+        def agregar_finalizado(external_id, start_time, details, home_score=5, away_score=3):
             self.db.add(
                 Game(
                     league_id=self.league.id,
@@ -284,18 +311,23 @@ class GameDetailsPersistenceTest(unittest.TestCase):
                     start_time=start_time,
                     status="final",
                     details=details,
+                    home_score=home_score,
+                    away_score=away_score,
                 )
             )
 
-        agregar_finalizado("1", ayer, {"home_pitcher": "Abridor"})  # nunca procesado como final
-        agregar_finalizado("2", ayer, {"winning_pitcher": "Ganador Real"})  # ya tiene decision
+        agregar_finalizado("1", anteayer, {"home_pitcher": "Abridor"})  # nunca procesado como final
+        agregar_finalizado("2", anteayer, {"winning_pitcher": "Ganador Real"})  # ya tiene decision
         agregar_finalizado("3", hace_dos_meses, {"home_pitcher": "Abridor"})  # fuera de la ventana
-        agregar_finalizado("4", ayer, {"winning_pitcher": None, "losing_pitcher": None})  # sin decision oficial
+        agregar_finalizado("4", anteayer, {"winning_pitcher": None, "losing_pitcher": None})  # sin decision oficial
+        agregar_finalizado(  # la API lo dio como aplazado y quedo guardado como final
+            "5", ayer, {"home_pitcher": None}, home_score=None, away_score=None
+        )
         self.db.commit()
 
         self.assertEqual(
-            sync_service._dates_with_missing_decisions(self.db, self.league),
-            {ayer.date()},
+            sync_service._dates_with_stale_final_games(self.db, self.league),
+            {anteayer.date(), ayer.date()},
         )
 
 
